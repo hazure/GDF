@@ -1,4 +1,0 @@
-{
-  "brief": "采样温度",
-  "full": "默认值：0.7。\n作用范围：payload 中的 temperature，越高越发散，越低越确定。\n与 llm_thinking 为 enabled 时的部分推理模型可能互斥。\n服务端若报参数冲突，可删掉此项或调低。"
-}

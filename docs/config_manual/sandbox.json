@@ -1,4 +1,0 @@
-{
-  "brief": "沙箱环境开关",
-  "full": "默认值：true。\n作用范围：切换 API 基址。true 走 sandbox.api.sgroup.qq.com，false 走 api.sgroup.qq.com。\n调试期保持 true，上线前改为 false。\n状态查询指令 status 会显示当前值。"
-}

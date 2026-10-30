@@ -1,4 +1,0 @@
-{
-  "brief": "强制 JSON 输出",
-  "full": "默认值：false。\n作用范围：为 true 时注入 response_format.type 为 json_object。\n开启后必须在 prompt_system.txt 中显式要求输出 JSON，否则部分服务商返回 400。\n适用于需要结构化结果的插件场景。"
-}

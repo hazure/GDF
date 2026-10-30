@@ -1,4 +1,0 @@
-{
-  "brief": "机器人 AppID",
-  "full": "默认值：无，必填。\n作用范围：QQ 开放平台应用标识，用于申请 AccessToken 与 identify 握手。\n缺失时 main.py 直接退出并记 ERROR。\n在开发者后台创建机器人应用后获取。"
-}

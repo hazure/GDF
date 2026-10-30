@@ -1,5 +1,4 @@
 import sys
-from collections.abc import Callable
 from typing import Any
 
 from loguru import logger
@@ -7,37 +6,8 @@ from loguru import logger
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_RETENTION = "7 days"
 
-STDERR_FORMAT = (
-    "<white>{time:HH:mm:ss}</white> "
-    "[<level>{level}</level>] "
-    "<level>{message}</level>"
-)
-
-_STDERR_SINK_ID: int | None = None
-
-RedrawHandler = Callable[[str], None]
-_redraw_handler: RedrawHandler | None = None
-
-
-def set_redraw_handler(handler: RedrawHandler | None) -> None:
-    global _redraw_handler
-    _redraw_handler = handler
-
-
-def _stderr_sink(message: Any) -> None:
-    text = str(message)
-    if _redraw_handler is not None:
-        try:
-            _redraw_handler(text)
-            return
-        except Exception:
-            pass
-    sys.stderr.write(text)
-    sys.stderr.flush()
-
 
 def setup_logger(config: dict[str, Any] | None = None) -> None:
-    global _STDERR_SINK_ID
     cfg = config or {}
     log_dir = str(cfg.get("log_dir") or DEFAULT_LOG_DIR)
     retention = str(cfg.get("log_retention") or DEFAULT_RETENTION)
@@ -48,9 +18,15 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
     logger.level("ERROR", color="<red>")
     logger.level("WARNING", color="<yellow>")
 
-    _STDERR_SINK_ID = logger.add(
-        _stderr_sink,
-        format=STDERR_FORMAT,
+    log_format = (
+        "<white>{time:HH:mm:ss}</white> "
+        "[<level>{level}</level>] "
+        "<level>{message}</level>"
+    )
+
+    logger.add(
+        sys.stderr,
+        format=log_format,
         colorize=True,
     )
 
@@ -73,26 +49,4 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
         retention=retention,
         encoding="utf-8",
         colorize=False,
-    )
-
-
-def pause_stderr() -> None:
-    global _STDERR_SINK_ID
-    if _STDERR_SINK_ID is None:
-        return
-    try:
-        logger.remove(_STDERR_SINK_ID)
-    except ValueError:
-        pass
-    _STDERR_SINK_ID = None
-
-
-def resume_stderr() -> None:
-    global _STDERR_SINK_ID
-    if _STDERR_SINK_ID is not None:
-        return
-    _STDERR_SINK_ID = logger.add(
-        _stderr_sink,
-        format=STDERR_FORMAT,
-        colorize=True,
     )

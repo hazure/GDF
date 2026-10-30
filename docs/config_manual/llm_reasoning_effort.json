@@ -1,4 +1,0 @@
-{
-  "brief": "推理投入程度",
-  "full": "默认值：medium。\n作用范围：payload 中的 reasoning_effort，可选 low、medium、high。\n置空字符串则不注入该字段。\n越高耗时与费用越大，仅在支持该参数的服务商下有效。"
-}
