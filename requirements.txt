@@ -1,0 +1,2 @@
+aiohttp>=3.9
+loguru>=0.7

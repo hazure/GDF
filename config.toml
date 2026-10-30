@@ -1,0 +1,4 @@
+app_id = ""
+app_secret = ""
+sandbox = true
+mode = "ws"
