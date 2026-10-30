@@ -16,7 +16,7 @@ def setup_logger() -> None:
 
     log_format = (
         "<white>{time:HH:mm:ss}</white> "
-        "[<level>{level: <7}</level>] "
+        "[<level>{level}</level>] "
         "<level>{message}</level>"
     )
 
@@ -26,7 +26,7 @@ def setup_logger() -> None:
         colorize=True,
     )
 
-    file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level: <7}] {message}"
+    file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
 
     logger.add(
         f"{LOG_DIR}/info_{{time:YYYY-MM-DD}}.log",
