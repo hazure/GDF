@@ -6,6 +6,35 @@ from loguru import logger
 DEFAULT_LOG_DIR = "logs"
 DEFAULT_RETENTION = "7 days"
 
+STDERR_FORMAT = (
+    "<white>{time:HH:mm:ss}</white> "
+    "[<level>{level}</level>] "
+    "<level>{message}</level>"
+)
+STDERR_START_LEVEL = "INFO"
+STDERR_RUNTIME_LEVEL = "WARNING"
+
+_STDERR_SINK_ID: int | None = None
+
+
+def _add_stderr(level: str) -> None:
+    global _STDERR_SINK_ID
+    if _STDERR_SINK_ID is not None:
+        try:
+            logger.remove(_STDERR_SINK_ID)
+        except ValueError:
+            pass
+    _STDERR_SINK_ID = logger.add(
+        sys.stderr,
+        format=STDERR_FORMAT,
+        colorize=True,
+        level=level,
+    )
+
+
+def mute_stderr_info() -> None:
+    _add_stderr(STDERR_RUNTIME_LEVEL)
+
 
 def setup_logger(config: dict[str, Any] | None = None) -> None:
     cfg = config or {}
@@ -18,18 +47,7 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
     logger.level("ERROR", color="<red>")
     logger.level("WARNING", color="<yellow>")
 
-    log_format = (
-        "<white>{time:HH:mm:ss}</white> "
-        "[<level>{level}</level>] "
-        "<level>{message}</level>"
-    )
-
-    logger.add(
-        sys.stderr,
-        format=log_format,
-        colorize=True,
-        level="WARNING",
-    )
+    _add_stderr(STDERR_START_LEVEL)
 
     file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
 

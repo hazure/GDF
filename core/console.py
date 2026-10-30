@@ -11,6 +11,7 @@ from loguru import logger
 from core.bot import Bot
 from core.emitter import Emitter
 from core.loader import load_plugins, module_names
+from core.logger import mute_stderr_info
 
 PROMPT = "\nGDF > "
 
@@ -25,6 +26,7 @@ HELP_TEXT = (
 async def run_console(bot: Bot, ready: asyncio.Event) -> None:
     await ready.wait()
     start = time.monotonic()
+    mute_stderr_info()
     print("控制台已就绪, 输入 help 查看指令", flush=True)
     while True:
         try:
