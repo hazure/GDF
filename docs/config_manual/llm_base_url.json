@@ -1,0 +1,4 @@
+{
+  "brief": "LLM 接口地址",
+  "full": "默认值：https://api.deepseek.com/v1。\n作用范围：llm_chat 插件请求基址，实际请求路径为 {llm_base_url}/chat/completions。\n末尾斜杠会被自动去掉。\n任何兼容 OpenAI 协议的服务均可填写。"
+}

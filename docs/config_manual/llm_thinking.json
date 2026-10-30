@@ -1,0 +1,4 @@
+{
+  "brief": "深度思考开关",
+  "full": "默认值：disabled。\n作用范围：payload 中的 thinking.type，可选 enabled 或 disabled。\n置空字符串则不注入该字段。\nenabled 时部分推理模型会拒绝 temperature 与 top_p，需同步删除那两项。"
+}

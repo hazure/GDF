@@ -1,0 +1,4 @@
+{
+  "brief": "LLM 模型名",
+  "full": "默认值：deepseek-chat。\n作用范围：请求 payload 中的 model 字段，原样透传不做校验。\n名称写错时服务端返回错误，插件记 ERROR 并回兜底文案。\n需与 llm_base_url 指向的服务商支持的模型一致。"
+}
