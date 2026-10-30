@@ -25,8 +25,9 @@ DEFAULT_HEARTBEAT_MS = 30000.0
 
 
 class WsConnector:
-    def __init__(self, bot: Bot) -> None:
+    def __init__(self, bot: Bot, ready: asyncio.Event | None = None) -> None:
         self._bot = bot
+        self._ready = ready
 
     async def run(self) -> None:
         backoff = INITIAL_BACKOFF
@@ -59,6 +60,8 @@ class WsConnector:
     ) -> None:
         interval = await self._hello_interval(ws)
         await ws.send_json(identify)
+        if self._ready is not None and not self._ready.is_set():
+            self._ready.set()
         heartbeat = asyncio.create_task(self._heartbeat_loop(ws, interval))
         try:
             async for msg in ws:

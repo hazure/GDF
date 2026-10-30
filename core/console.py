@@ -12,7 +12,7 @@ from core.bot import Bot
 from core.emitter import Emitter
 from core.loader import load_plugins, module_names
 
-PROMPT = "GDF > "
+PROMPT = "\nGDF > "
 
 HELP_TEXT = (
     "help    显示本列表\n"
@@ -22,7 +22,8 @@ HELP_TEXT = (
 )
 
 
-async def run_console(bot: Bot) -> None:
+async def run_console(bot: Bot, ready: asyncio.Event) -> None:
+    await ready.wait()
     start = time.monotonic()
     logger.info("控制台已就绪, 输入 help 查看指令")
     while True:

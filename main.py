@@ -30,9 +30,10 @@ async def run(config: dict[str, Any]) -> None:
     )
     bot = Bot(api=api, emitter=Emitter(), config=config)
     load_plugins(bot.emitter)
-    console = asyncio.create_task(run_console(bot))
+    ready = asyncio.Event()
+    console = asyncio.create_task(run_console(bot, ready))
     try:
-        await WsConnector(bot).run()
+        await WsConnector(bot, ready).run()
     finally:
         console.cancel()
         with suppress(asyncio.CancelledError):
