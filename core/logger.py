@@ -19,7 +19,7 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
     logger.level("WARNING", color="<yellow>")
 
     log_format = (
-        "\n<white>{time:HH:mm:ss}</white> "
+        "<white>{time:HH:mm:ss}</white> "
         "[<level>{level}</level>] "
         "<level>{message}</level>"
     )
