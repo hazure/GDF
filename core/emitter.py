@@ -19,6 +19,12 @@ class Emitter:
     def handlers_of(self, event_type: str) -> tuple[Handler, ...]:
         return tuple(self._routes.get(event_type, ()))
 
+    def count(self) -> int:
+        return sum(len(handlers) for handlers in self._routes.values())
+
+    def clear(self) -> None:
+        self._routes.clear()
+
     async def dispatch(self, event: Event, bot: Any) -> None:
         for handler in self.handlers_of(event.type):
             try:

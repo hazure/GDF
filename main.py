@@ -1,5 +1,6 @@
 import asyncio
 import tomllib
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ from loguru import logger
 from core.api.client import ApiClient
 from core.bot import Bot
 from core.connector.ws import WsConnector
+from core.console import run_console
 from core.emitter import Emitter
 from core.loader import load_plugins
 from core.logger import setup_logger
@@ -28,9 +30,13 @@ async def run(config: dict[str, Any]) -> None:
     )
     bot = Bot(api=api, emitter=Emitter(), config=config)
     load_plugins(bot.emitter)
+    console = asyncio.create_task(run_console(bot))
     try:
         await WsConnector(bot).run()
     finally:
+        console.cancel()
+        with suppress(asyncio.CancelledError):
+            await console
         await api.close()
 
 
