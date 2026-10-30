@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -15,9 +14,7 @@ DEFAULT_MODEL = "gpt-3.5-turbo"
 TIMEOUT = 30.0
 FALLBACK = "AI 思考失败，请稍后再试"
 ECHO_PREFIX = "echo "
-
-_SESSION: aiohttp.ClientSession | None = None
-_LOCK = asyncio.Lock()
+PING_COMMAND = "ping"
 
 
 def on_group_at(func: Handler) -> Handler:
@@ -42,7 +39,7 @@ async def llm_c2c(event: C2CMessage, bot: Bot) -> None:
 
 async def _chat(event: Event, bot: Bot) -> None:
     prompt = event.content.strip()
-    if prompt.startswith(ECHO_PREFIX):
+    if prompt.startswith(ECHO_PREFIX) or prompt == PING_COMMAND:
         return
     if not prompt:
         return
@@ -65,13 +62,16 @@ async def _complete(bot: Bot, prompt: str) -> str:
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
     }
-    session = await _client()
+    session = await bot.api.session()
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     async with session.post(
-        f"{base_url}/chat/completions", json=payload, headers=headers
+        f"{base_url}/chat/completions",
+        json=payload,
+        headers=headers,
+        timeout=aiohttp.ClientTimeout(total=TIMEOUT),
     ) as resp:
         data: Any = await resp.json(content_type=None)
         if resp.status >= 400:
@@ -83,13 +83,3 @@ async def _complete(bot: Bot, prompt: str) -> str:
         raise RuntimeError(f"LLM 响应缺少 choices: {data}")
     message = choices[0].get("message") or {}
     return str(message.get("content") or "").strip() or FALLBACK
-
-
-async def _client() -> aiohttp.ClientSession:
-    global _SESSION
-    async with _LOCK:
-        if _SESSION is None or _SESSION.closed:
-            _SESSION = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=TIMEOUT)
-            )
-        return _SESSION
