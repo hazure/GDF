@@ -28,6 +28,7 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
         sys.stderr,
         format=log_format,
         colorize=True,
+        level="WARNING",
     )
 
     file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"

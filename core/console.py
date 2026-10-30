@@ -25,7 +25,7 @@ HELP_TEXT = (
 async def run_console(bot: Bot, ready: asyncio.Event) -> None:
     await ready.wait()
     start = time.monotonic()
-    logger.info("控制台已就绪, 输入 help 查看指令")
+    print("控制台已就绪, 输入 help 查看指令", flush=True)
     while True:
         try:
             line = await asyncio.to_thread(input, PROMPT)
@@ -35,29 +35,26 @@ async def run_console(bot: Bot, ready: asyncio.Event) -> None:
         if not command:
             continue
         if command == "help":
-            logger.info("可用指令:\n{}", HELP_TEXT)
+            print(HELP_TEXT, flush=True)
         elif command == "status":
             _status(bot, start)
         elif command == "reload":
             _reload(bot.emitter)
         elif command == "exit":
-            logger.info("控制台请求退出")
+            print("控制台请求退出", flush=True)
             os.kill(os.getpid(), signal.SIGINT)
             return
         else:
-            logger.error("未知指令: {}, 输入 help 查看可用指令", command)
+            print(f"未知指令: {command}, 输入 help 查看可用指令", flush=True)
 
 
 def _status(bot: Bot, start: float) -> None:
     hours, rem = divmod(int(time.monotonic() - start), 3600)
     minutes, seconds = divmod(rem, 60)
-    logger.info(
-        "运行 {}h{}m{}s | 处理器 {} 个 | 沙箱 {}",
-        hours,
-        minutes,
-        seconds,
-        bot.emitter.count(),
-        bool(bot.config.get("sandbox", False)),
+    print(
+        f"运行 {hours}h{minutes}m{seconds}s | 处理器 {bot.emitter.count()} 个"
+        f" | 沙箱 {bool(bot.config.get('sandbox', False))}",
+        flush=True,
     )
 
 
@@ -72,4 +69,4 @@ def _reload(emitter: Emitter) -> None:
             logger.opt(exception=True).error("插件重载失败: {}", name)
     emitter.clear()
     total = load_plugins(emitter)
-    logger.success("插件已重载, 处理器 {} 个", total)
+    print(f"插件已重载, 处理器 {total} 个", flush=True)
