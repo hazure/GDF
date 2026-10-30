@@ -24,7 +24,6 @@ def setup_logger() -> None:
         sys.stderr,
         format=log_format,
         colorize=True,
-        default_extra={"module": "Core"},
     )
 
     file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level: <7}] {message}"
@@ -37,7 +36,6 @@ def setup_logger() -> None:
         retention=RETENTION,
         encoding="utf-8",
         colorize=False,
-        default_extra={"module": "Core"},
     )
     logger.add(
         f"{LOG_DIR}/error_{{time:YYYY-MM-DD}}.log",
@@ -47,5 +45,4 @@ def setup_logger() -> None:
         retention=RETENTION,
         encoding="utf-8",
         colorize=False,
-        default_extra={"module": "Core"},
     )
