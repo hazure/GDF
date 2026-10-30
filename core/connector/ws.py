@@ -9,6 +9,7 @@ from core.bot import Bot
 from core.protocol.events import parse_event
 
 INTENTS: int = 1 << 25
+TOKEN_PREFIX = "QQBot"
 
 OP_DISPATCH = 0
 OP_HEARTBEAT = 1
@@ -139,7 +140,7 @@ def _identify_payload(token: str) -> dict[str, Any]:
     return {
         "op": OP_IDENTIFY,
         "d": {
-            "token": f"QQBot {token}",
+            "token": f"{TOKEN_PREFIX} {token}",
             "intents": INTENTS,
             "shard": [0, 1],
             "properties": {},
@@ -151,7 +152,7 @@ def _resume_payload(token: str, session_id: str, seq: int) -> dict[str, Any]:
     return {
         "op": OP_RESUME,
         "d": {
-            "token": f"QQBot {token}",
+            "token": f"{TOKEN_PREFIX} {token}",
             "session_id": session_id,
             "seq": seq,
         },

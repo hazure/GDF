@@ -10,6 +10,7 @@ PRODUCTION_BASE = "https://api.sgroup.qq.com"
 SANDBOX_BASE = "https://sandbox.api.sgroup.qq.com"
 TOKEN_SAFETY_SECONDS = 60.0
 DEFAULT_TOKEN_TTL = 7200.0
+TOKEN_PREFIX = "QQBot"
 
 
 class ApiClient:
@@ -52,7 +53,7 @@ class ApiClient:
     async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         session = await self.session()
         headers = {
-            "Authorization": f"QQBot {await self.token()}",
+            "Authorization": f"{TOKEN_PREFIX} {await self.token()}",
             "Content-Type": "application/json",
         }
         async with session.request(
