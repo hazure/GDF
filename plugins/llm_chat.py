@@ -1,5 +1,7 @@
 import asyncio
 import json
+import shutil
+import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -13,25 +15,32 @@ from core.protocol.events import C2CMessage, Event, GroupAtMessage
 Handler = Callable[..., Awaitable[None]]
 
 PLUGIN_DIR = Path(__file__).resolve().parent
-DATA_DIR = PLUGIN_DIR.parent / "data"
-HISTORY_PATH = DATA_DIR / "history.json"
 SYSTEM_PATH = PLUGIN_DIR / "prompt_system.txt"
 WORLD_PATH = PLUGIN_DIR / "prompt_world.txt"
 
+DEFAULT_HISTORY_PATH = "data/history.json"
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 0.9
 DEFAULT_MAX_TOKENS = 1024
 DEFAULT_CONTEXT_LIMIT = 10
+DEFAULT_TIMEOUT = 30.0
+DEFAULT_MAX_CONCURRENCY = 3
+DEFAULT_CONCURRENCY_WINDOW = 60.0
+DEFAULT_MEMORY_GC_DAYS = 7
+DEFAULT_MEMORY_GC_INTERVAL = 86400.0
 
-TIMEOUT = 30.0
 FALLBACK = "AI 思考失败，请稍后再试"
+RATE_LIMIT_TEXT = "请求太频繁，请稍后再试"
 ECHO_PREFIX = "echo "
 PING_COMMAND = "ping"
 
 _HISTORY_LOCK = asyncio.Lock()
+_RATE_LOCK = asyncio.Lock()
 _SYSTEM_CACHE: str | None = None
+_RATE: dict[str, list[float]] = {}
+_GC_TASK: asyncio.Task[None] | None = None
 
 
 def on_group_at(func: Handler) -> Handler:
@@ -59,10 +68,15 @@ async def _chat(event: Event, bot: Bot) -> None:
     if not prompt or prompt.startswith(ECHO_PREFIX) or prompt == PING_COMMAND:
         return
     conv_id = _conv_id(event)
+    _ensure_gc(bot)
+    if not await _allow(bot, conv_id):
+        logger.warning("触发频控 conv={}", conv_id)
+        await bot.reply(event, RATE_LIMIT_TEXT)
+        return
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
     async with _HISTORY_LOCK:
-        history = await _load()
-        turns = list(history.get(conv_id, []))
+        history = await _load(bot)
+        turns = _messages_of(history.get(conv_id))
     messages = _build_messages(prompt, turns, limit)
     try:
         reply = await _complete(bot, messages)
@@ -73,12 +87,15 @@ async def _chat(event: Event, bot: Bot) -> None:
         await bot.reply(event, FALLBACK)
         return
     async with _HISTORY_LOCK:
-        history = await _load()
-        turns = history.get(conv_id, [])
+        history = await _load(bot)
+        turns = _messages_of(history.get(conv_id))
         turns.append({"role": "user", "content": prompt})
         turns.append({"role": "assistant", "content": reply})
-        history[conv_id] = turns[-2 * limit :] if limit > 0 else []
-        await _save(history)
+        history[conv_id] = {
+            "last_active": time.time(),
+            "messages": turns[-2 * limit :] if limit > 0 else [],
+        }
+        await _save(bot, history)
     await bot.reply(event, reply)
 
 
@@ -87,6 +104,7 @@ async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
     if not api_key:
         raise RuntimeError("config.toml 缺少 llm_api_key")
     base_url = str(bot.config.get("llm_base_url") or DEFAULT_BASE_URL).rstrip("/")
+    timeout = _float_config(bot, "llm_timeout", DEFAULT_TIMEOUT)
     payload = _payload(bot, messages)
     logger.debug("LLM payload: {}", json.dumps(payload, ensure_ascii=False)[:300])
     session = await bot.api.session()
@@ -98,7 +116,7 @@ async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
         f"{base_url}/chat/completions",
         json=payload,
         headers=headers,
-        timeout=aiohttp.ClientTimeout(total=TIMEOUT),
+        timeout=aiohttp.ClientTimeout(total=timeout),
     ) as resp:
         data: Any = await resp.json(content_type=None)
         if resp.status >= 400:
@@ -171,24 +189,122 @@ def _conv_id(event: Event) -> str:
     return f"event:{event.id}"
 
 
-async def _load() -> dict[str, list[dict[str, str]]]:
-    if not HISTORY_PATH.exists():
+def _history_path(bot: Bot) -> Path:
+    raw = str(bot.config.get("llm_history_path") or DEFAULT_HISTORY_PATH)
+    path = Path(raw)
+    return path if path.is_absolute() else PLUGIN_DIR.parent / path
+
+
+def _messages_of(entry: Any) -> list[dict[str, str]]:
+    if isinstance(entry, dict):
+        messages = entry.get("messages")
+        return messages if isinstance(messages, list) else []
+    if isinstance(entry, list):
+        return entry
+    return []
+
+
+async def _load(bot: Bot) -> dict[str, dict[str, Any]]:
+    path = _history_path(bot)
+    if not path.exists():
         return {}
     try:
-        raw = await asyncio.to_thread(HISTORY_PATH.read_text, encoding="utf-8")
+        raw = await asyncio.to_thread(path.read_text, encoding="utf-8")
         data = json.loads(raw)
     except (OSError, json.JSONDecodeError):
         logger.opt(exception=True).error("历史文件损坏, 本次按空历史处理")
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    history: dict[str, dict[str, Any]] = {}
+    legacy = False
+    for key, value in data.items():
+        if isinstance(value, list):
+            history[key] = {"last_active": time.time(), "messages": value}
+            legacy = True
+        elif isinstance(value, dict):
+            history[key] = value
+    if legacy:
+        logger.info("检测到旧格式历史, 已迁移为带时间戳结构")
+    return history
 
 
-async def _save(history: dict[str, list[dict[str, str]]]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+async def _save(bot: Bot, history: dict[str, dict[str, Any]]) -> None:
+    path = _history_path(bot)
+    await asyncio.to_thread(path.parent.mkdir, parents=True, exist_ok=True)
+    await _backup_legacy(path)
     text = json.dumps(history, ensure_ascii=False, indent=2)
-    tmp = HISTORY_PATH.with_name(HISTORY_PATH.name + ".tmp")
+    tmp = path.with_name(path.name + ".tmp")
     await asyncio.to_thread(tmp.write_text, text, encoding="utf-8")
-    await asyncio.to_thread(tmp.replace, HISTORY_PATH)
+    await asyncio.to_thread(tmp.replace, path)
+
+
+async def _backup_legacy(path: Path) -> None:
+    bak = path.with_name(path.name + ".bak")
+    if not path.exists() or bak.exists():
+        return
+    try:
+        await asyncio.to_thread(shutil.copy2, path, bak)
+        logger.info("已备份历史文件到 {}", bak.name)
+    except OSError:
+        logger.opt(exception=True).error("历史文件备份失败")
+
+
+async def _allow(bot: Bot, conv_id: str) -> bool:
+    limit = _int_config(bot, "llm_max_concurrency", DEFAULT_MAX_CONCURRENCY)
+    window = _float_config(bot, "llm_concurrency_window", DEFAULT_CONCURRENCY_WINDOW)
+    if limit <= 0 or window <= 0:
+        return True
+    now = time.monotonic()
+    async with _RATE_LOCK:
+        stamps = [stamp for stamp in _RATE.get(conv_id, []) if now - stamp < window]
+        if len(stamps) >= limit:
+            _RATE[conv_id] = stamps
+            return False
+        stamps.append(now)
+        _RATE[conv_id] = stamps
+        return True
+
+
+def _ensure_gc(bot: Bot) -> None:
+    global _GC_TASK
+    if _GC_TASK is None or _GC_TASK.done():
+        _GC_TASK = asyncio.create_task(_gc_loop(bot))
+
+
+async def _gc_loop(bot: Bot) -> None:
+    while True:
+        interval = _float_config(
+            bot, "llm_memory_gc_interval", DEFAULT_MEMORY_GC_INTERVAL
+        )
+        if interval <= 0:
+            return
+        await asyncio.sleep(interval)
+        await _gc_once(bot)
+
+
+async def _gc_once(bot: Bot) -> None:
+    days = _int_config(bot, "llm_memory_gc_days", DEFAULT_MEMORY_GC_DAYS)
+    if days <= 0:
+        return
+    cutoff = time.time() - days * 86400
+    async with _HISTORY_LOCK:
+        history = await _load(bot)
+        keep = {
+            key: value for key, value in history.items() if _active_at(value) >= cutoff
+        }
+        removed = len(history) - len(keep)
+        if removed <= 0:
+            return
+        await _save(bot, keep)
+    logger.info("记忆 GC 清理 {} 个会话", removed)
+
+
+def _active_at(value: dict[str, Any]) -> float:
+    try:
+        return float(value.get("last_active", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _float_config(bot: Bot, key: str, default: float) -> float:

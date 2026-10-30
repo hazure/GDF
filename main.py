@@ -42,8 +42,13 @@ async def run(config: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    setup_logger()
-    config = load_config()
+    try:
+        config = load_config()
+    except Exception:
+        setup_logger()
+        logger.opt(exception=True).error("配置读取失败")
+        raise SystemExit(1)
+    setup_logger(config)
     if not config.get("app_id") or not config.get("app_secret"):
         logger.error("config.toml 缺少 app_id 或 app_secret")
         raise SystemExit(1)

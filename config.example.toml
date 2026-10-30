@@ -3,9 +3,23 @@ app_secret = "your_app_secret"
 sandbox = true
 mode = "ws"
 
+# 连接与协议
+ws_reconnect_max_delay = 60
+
+# LLM
 llm_api_key = "your_api_key"
 llm_base_url = "https://api.deepseek.com/v1"
 llm_model = "deepseek-chat"
+llm_timeout = 30.0
+llm_history_path = "data/history.json"
+
+# 防刷屏
+llm_max_concurrency = 3
+llm_concurrency_window = 60
+
+# 防炸库
+llm_memory_gc_days = 7
+llm_memory_gc_interval = 86400
 
 # 模型参数
 llm_temperature = 0.7
@@ -16,3 +30,7 @@ llm_thinking = "disabled"
 llm_reasoning_effort = "medium"
 llm_json_mode = false
 llm_logprobs = false
+
+# 日志
+log_retention = "7 days"
+log_dir = "logs"

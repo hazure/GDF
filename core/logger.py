@@ -1,12 +1,16 @@
 import sys
+from typing import Any
 
 from loguru import logger
 
-LOG_DIR = "logs"
-RETENTION = "7 days"
+DEFAULT_LOG_DIR = "logs"
+DEFAULT_RETENTION = "7 days"
 
 
-def setup_logger() -> None:
+def setup_logger(config: dict[str, Any] | None = None) -> None:
+    cfg = config or {}
+    log_dir = str(cfg.get("log_dir") or DEFAULT_LOG_DIR)
+    retention = str(cfg.get("log_retention") or DEFAULT_RETENTION)
     logger.remove()
 
     logger.level("INFO", color="<white>")
@@ -29,20 +33,20 @@ def setup_logger() -> None:
     file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
 
     logger.add(
-        f"{LOG_DIR}/info_{{time:YYYY-MM-DD}}.log",
+        f"{log_dir}/info_{{time:YYYY-MM-DD}}.log",
         format=file_format,
         level="INFO",
         rotation="00:00",
-        retention=RETENTION,
+        retention=retention,
         encoding="utf-8",
         colorize=False,
     )
     logger.add(
-        f"{LOG_DIR}/error_{{time:YYYY-MM-DD}}.log",
+        f"{log_dir}/error_{{time:YYYY-MM-DD}}.log",
         format=file_format,
         level="ERROR",
         rotation="00:00",
-        retention=RETENTION,
+        retention=retention,
         encoding="utf-8",
         colorize=False,
     )
