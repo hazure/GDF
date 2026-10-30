@@ -24,9 +24,9 @@ POLL_INTERVAL = 0.5
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="gdf", description="极简 QQ AI 机器人框架")
-    parser.add_argument("-l", "--log", action="store_true", help="实时查看当天日志")
+    parser.add_argument("--log", action="store_true", help="实时查看当天日志")
     parser.add_argument(
-        "-ni", "--no-input", action="store_true", help="无头模式, 不挂载控制台"
+        "--no-input", action="store_true", help="无头模式, 不挂载控制台"
     )
     return parser.parse_args()
 
@@ -56,6 +56,8 @@ async def run(config: dict[str, Any], with_console: bool) -> None:
             with suppress(asyncio.CancelledError):
                 await console
         await api.close()
+        if console is None:
+            print("机器人已退出", flush=True)
 
 
 def _log_path() -> Path:

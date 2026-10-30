@@ -85,20 +85,20 @@ plugins/prompt_world.txt    世界书设定
 ## 命令行参数
 
 ```
-python main.py            # 默认模式，挂载 GDF > 控制台
-python main.py -ni        # 无头模式，不挂载控制台，日志只进文件
-python main.py -l         # 日志查看模式，只读，不启动机器人
+python main.py                 # 默认模式，挂载 GDF > 控制台
+python main.py --no-input      # 无头模式，不挂载控制台，日志只进文件
+python main.py --log           # 日志查看模式，只读，不启动机器人
 ```
 
-`-ni` / `--no-input` 适合 systemd、Termux 后台、nohup 等无人值守场景，Ctrl+C 仍触发优雅退出。
+`--no-input` 适合 systemd、Termux 后台、nohup 等无人值守场景，Ctrl+C 仍触发优雅退出并打印 `机器人已退出`。
 
-`-l` / `--log` 独立于机器人逻辑：不读 `config.toml`、不初始化 ApiClient、不连接 QQ。先打印当天 `info` 日志末 50 行，随后每 0.5 秒轮询新增内容实时输出，跨零点自动切换到新文件。Ctrl+C 只退出查看模式。
+`--log` 独立于机器人逻辑：不读 `config.toml`、不初始化 ApiClient、不连接 QQ。先打印当天 `info` 日志末 50 行，随后每 0.5 秒轮询新增内容实时输出，跨零点自动切换到新文件。Ctrl+C 只退出查看模式。
 
 ## 实时查看日志
 
 ```
 cd ~/gdf
-python main.py -l
+python main.py --log
 ```
 
 无需另开 tail，也可直接用系统命令：
