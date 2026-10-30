@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from prompt_toolkit import Application
+from prompt_toolkit import Application, PromptSession
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.key_binding import KeyBindings
@@ -30,9 +31,9 @@ from prompt_toolkit.styles import Style
 from core.bot import Bot
 from core.emitter import Emitter
 from core.loader import load_plugins, module_names
-from core.logger import pause_stderr, resume_stderr
+from core.logger import pause_stderr, resume_stderr, set_redraw_handler
 
-PROMPT = "\nGDF > "
+PROMPT = "GDF > "
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_PATH = ROOT_DIR / "config.toml"
@@ -60,11 +61,14 @@ HELP_TEXT = (
 async def run_console(bot: Bot, ready: asyncio.Event) -> None:
     await ready.wait()
     start = time.monotonic()
+    session = PromptSession()
+    set_redraw_handler(_redraw_log)
     logger.info("控制台已就绪, 输入 help 查看指令")
     while True:
         try:
-            line = await asyncio.to_thread(input, PROMPT)
+            line = await session.prompt_async(PROMPT)
         except (EOFError, KeyboardInterrupt):
+            set_redraw_handler(None)
             return
         command = line.strip().lower()
         if not command:
@@ -79,10 +83,31 @@ async def run_console(bot: Bot, ready: asyncio.Event) -> None:
             await _run_edit()
         elif command == "exit":
             logger.info("控制台请求退出")
+            set_redraw_handler(None)
             os.kill(os.getpid(), signal.SIGINT)
             return
         else:
             logger.error("未知指令: {}, 输入 help 查看可用指令", command)
+
+
+def _redraw_log(text: str) -> None:
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        sys.stderr.write(text)
+        sys.stderr.flush()
+        return
+    loop.create_task(_write_through_prompt(text))
+
+
+async def _write_through_prompt(text: str) -> None:
+    try:
+        async with run_in_terminal():
+            sys.stderr.write(text)
+            sys.stderr.flush()
+    except Exception:
+        sys.stderr.write(text)
+        sys.stderr.flush()
 
 
 def _status(bot: Bot, start: float) -> None:
@@ -266,33 +291,32 @@ class _ConfigEditor:
             layout=Layout(root),
             key_bindings=keys,
             style=EDIT_STYLE,
-            full_screen=True,
+            full_screen=False,
             mouse_support=False,
         )
 
 
 async def _run_edit() -> None:
+    editor = _ConfigEditor(_read_config(), _load_manual())
+    app = editor.build()
     pause_stderr()
     try:
-        values, accepted = await asyncio.to_thread(_edit_config)
-    finally:
+        await app.run_async()
+    except Exception:
         resume_stderr()
-    if not accepted:
+        logger.opt(exception=True).error("TUI 崩溃")
+        return
+    resume_stderr()
+    if not editor.accepted:
         logger.info("已取消, 配置未改动")
         return
     try:
-        await asyncio.to_thread(_write_config, values)
+        await asyncio.to_thread(_write_config, editor.values())
     except OSError:
         logger.opt(exception=True).error("写入 config.toml 失败")
         return
     logger.success("保存成功, 输入 reload 生效")
     logger.warning("日志目录与保留期需重启进程才生效")
-
-
-def _edit_config() -> tuple[dict[str, Any], bool]:
-    editor = _ConfigEditor(_read_config(), _load_manual())
-    editor.build().run()
-    return editor.values(), editor.accepted
 
 
 def _read_config() -> dict[str, Any]:
