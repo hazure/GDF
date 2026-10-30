@@ -59,8 +59,14 @@ class ApiClient:
         ) as resp:
             data = await resp.json(content_type=None)
             if resp.status >= 400:
+                err_code = data.get("err_code") if isinstance(data, dict) else None
+                message = data.get("message") if isinstance(data, dict) else data
                 logger.error(
-                    "API 请求失败 status={} path={} data={}", resp.status, path, data
+                    "API 请求失败 status={} path={} err_code={} message={}",
+                    resp.status,
+                    path,
+                    err_code,
+                    message,
                 )
         return data if isinstance(data, dict) else {"data": data}
 
