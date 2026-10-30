@@ -4,6 +4,7 @@ from core.bot import Bot
 from core.protocol.events import GroupAtMessage
 
 Handler = Callable[..., Awaitable[None]]
+COMMAND_PREFIX = "echo "
 
 
 def on_group_at(func: Handler) -> Handler:
@@ -13,4 +14,7 @@ def on_group_at(func: Handler) -> Handler:
 
 @on_group_at
 async def echo(event: GroupAtMessage, bot: Bot) -> None:
-    await bot.reply(event, event.content)
+    text = event.content.strip()
+    if not text.startswith(COMMAND_PREFIX):
+        return
+    await bot.reply(event, text[len(COMMAND_PREFIX) :].strip())

@@ -26,7 +26,7 @@ async def run(config: dict[str, Any]) -> None:
         app_secret=str(config["app_secret"]),
         sandbox=bool(config.get("sandbox", False)),
     )
-    bot = Bot(api=api, emitter=Emitter())
+    bot = Bot(api=api, emitter=Emitter(), config=config)
     load_plugins(bot.emitter)
     try:
         await WsConnector(bot).run()

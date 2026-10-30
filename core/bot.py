@@ -6,9 +6,12 @@ from core.protocol.events import C2CMessage, Event, GroupAtMessage
 
 
 class Bot:
-    def __init__(self, api: ApiClient, emitter: Emitter) -> None:
+    def __init__(
+        self, api: ApiClient, emitter: Emitter, config: dict[str, Any]
+    ) -> None:
         self.api = api
         self.emitter = emitter
+        self.config = config
 
     async def dispatch(self, event: Event) -> None:
         await self.emitter.dispatch(event, self)
