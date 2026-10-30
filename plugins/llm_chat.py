@@ -14,6 +14,7 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 DEFAULT_MODEL = "gpt-3.5-turbo"
 TIMEOUT = 30.0
 FALLBACK = "AI 思考失败，请稍后再试"
+ECHO_PREFIX = "echo "
 
 _SESSION: aiohttp.ClientSession | None = None
 _LOCK = asyncio.Lock()
@@ -41,6 +42,8 @@ async def llm_c2c(event: C2CMessage, bot: Bot) -> None:
 
 async def _chat(event: Event, bot: Bot) -> None:
     prompt = event.content.strip()
+    if prompt.startswith(ECHO_PREFIX):
+        return
     if not prompt:
         return
     try:
