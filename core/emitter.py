@@ -34,7 +34,7 @@ class Emitter:
             except Exception:
                 logger.opt(exception=True).error(
                     "插件异常已隔离: {}.{} event={}",
-                    handler.__module__,
-                    handler.__name__,
+                    getattr(handler, "__module__", "?"),
+                    getattr(handler, "__name__", repr(handler)),
                     event.type,
                 )

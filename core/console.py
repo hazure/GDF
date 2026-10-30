@@ -8,8 +8,7 @@ from typing import Any
 
 from loguru import logger
 
-from core.bot import Bot
-from core.emitter import Emitter
+from core.bot import Bot, flag_config
 from core.loader import load_plugins, module_names
 from core.logger import mute_stderr_info
 
@@ -41,7 +40,7 @@ async def run_console(bot: Bot, ready: asyncio.Event) -> None:
         elif command == "status":
             _status(bot, start)
         elif command == "reload":
-            _reload(bot.emitter)
+            _reload(bot)
         elif command == "exit":
             print("控制台请求退出", flush=True)
             os.kill(os.getpid(), signal.SIGINT)
@@ -55,12 +54,16 @@ def _status(bot: Bot, start: float) -> None:
     minutes, seconds = divmod(rem, 60)
     print(
         f"运行 {hours}h{minutes}m{seconds}s | 处理器 {bot.emitter.count()} 个"
-        f" | 沙箱 {bool(bot.config.get('sandbox', False))}",
+        f" | 沙箱 {flag_config(bot.config, 'sandbox')}",
         flush=True,
     )
 
 
-def _reload(emitter: Emitter) -> None:
+def _reload(bot: Bot) -> None:
+    task = getattr(bot, "_gc_task", None)
+    if task is not None and not task.done():
+        task.cancel()
+    setattr(bot, "_gc_task", None)
     for name in module_names():
         module: Any = sys.modules.get(name)
         if module is None:
@@ -69,6 +72,6 @@ def _reload(emitter: Emitter) -> None:
             importlib.reload(module)
         except Exception:
             logger.opt(exception=True).error("插件重载失败: {}", name)
-    emitter.clear()
-    total = load_plugins(emitter)
+    bot.emitter.clear()
+    total = load_plugins(bot.emitter)
     print(f"插件已重载, 处理器 {total} 个", flush=True)

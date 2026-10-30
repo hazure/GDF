@@ -1,6 +1,5 @@
 import asyncio
 import json
-from contextlib import suppress
 from typing import Any
 
 import aiohttp
@@ -81,8 +80,7 @@ class WsConnector:
                     break
         finally:
             heartbeat.cancel()
-            with suppress(asyncio.CancelledError):
-                await heartbeat
+            await asyncio.gather(heartbeat, return_exceptions=True)
 
     def _handshake(self, token: str) -> dict[str, Any]:
         if self._session_id is not None and self._seq is not None:

@@ -40,7 +40,6 @@ _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
 _SYSTEM_CACHE: str | None = None
 _RATE: dict[str, list[float]] = {}
-_GC_TASK: asyncio.Task[None] | None = None
 
 
 def on_group_at(func: Handler) -> Handler:
@@ -106,7 +105,6 @@ async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
     base_url = str(bot.config.get("llm_base_url") or DEFAULT_BASE_URL).rstrip("/")
     timeout = _float_config(bot, "llm_timeout", DEFAULT_TIMEOUT)
     payload = _payload(bot, messages)
-    logger.debug("LLM payload: {}", json.dumps(payload, ensure_ascii=False)[:300])
     session = await bot.api.session()
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -120,7 +118,7 @@ async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
     ) as resp:
         data: Any = await resp.json(content_type=None)
         if resp.status >= 400:
-            raise RuntimeError(f"LLM status={resp.status} data={data}")
+            raise RuntimeError(f"LLM status={resp.status} body={str(data)[:200]}")
     if not isinstance(data, dict):
         raise RuntimeError(f"LLM 响应非对象: {data}")
     choices = data.get("choices") or []
@@ -267,9 +265,9 @@ async def _allow(bot: Bot, conv_id: str) -> bool:
 
 
 def _ensure_gc(bot: Bot) -> None:
-    global _GC_TASK
-    if _GC_TASK is None or _GC_TASK.done():
-        _GC_TASK = asyncio.create_task(_gc_loop(bot))
+    task = getattr(bot, "_gc_task", None)
+    if task is None or task.done():
+        setattr(bot, "_gc_task", asyncio.create_task(_gc_loop(bot)))
 
 
 async def _gc_loop(bot: Bot) -> None:

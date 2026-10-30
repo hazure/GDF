@@ -1,7 +1,6 @@
 app_id = "your_app_id"
 app_secret = "your_app_secret"
 sandbox = true
-mode = "ws"
 
 # 连接与协议
 ws_reconnect_max_delay = 60

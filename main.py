@@ -7,7 +7,7 @@ from typing import Any
 from loguru import logger
 
 from core.api.client import ApiClient
-from core.bot import Bot
+from core.bot import Bot, flag_config
 from core.connector.ws import WsConnector
 from core.console import run_console
 from core.emitter import Emitter
@@ -26,7 +26,7 @@ async def run(config: dict[str, Any]) -> None:
     api = ApiClient(
         app_id=str(config["app_id"]),
         app_secret=str(config["app_secret"]),
-        sandbox=bool(config.get("sandbox", False)),
+        sandbox=flag_config(config, "sandbox"),
     )
     bot = Bot(api=api, emitter=Emitter(), config=config)
     load_plugins(bot.emitter)

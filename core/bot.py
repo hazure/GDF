@@ -5,6 +5,13 @@ from core.emitter import Emitter
 from core.protocol.events import C2CMessage, Event, GroupAtMessage
 
 
+def flag_config(config: dict[str, Any], key: str) -> bool:
+    value = config.get(key, False)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "on")
+    return bool(value)
+
+
 class Bot:
     def __init__(
         self, api: ApiClient, emitter: Emitter, config: dict[str, Any]

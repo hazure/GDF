@@ -9,6 +9,7 @@ TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
 PRODUCTION_BASE = "https://api.sgroup.qq.com"
 SANDBOX_BASE = "https://sandbox.api.sgroup.qq.com"
 TOKEN_SAFETY_SECONDS = 60.0
+DEFAULT_TOKEN_TTL = 7200.0
 
 
 class ApiClient:
@@ -96,6 +97,7 @@ class ApiClient:
 
 def _expires_in(data: dict[str, Any]) -> float:
     try:
-        return float(data.get("expires_in", 0))
+        value = float(data.get("expires_in", DEFAULT_TOKEN_TTL))
     except (TypeError, ValueError):
-        return 0.0
+        return DEFAULT_TOKEN_TTL
+    return value if value > 0 else DEFAULT_TOKEN_TTL
