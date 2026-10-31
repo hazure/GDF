@@ -44,6 +44,16 @@ FALLBACK = "AI 思考失败，请稍后再试"
 ECHO_PREFIX = "echo "
 PING_COMMAND = "ping"
 
+TOOL_DIRECTIVE = (
+    "【系统工具指令】\n"
+    "你拥有长期记忆的读写能力。\n"
+    "1. 当用户明确要求你「记住」某事，或提到重要的个人信息（如名字、喜好）时，"
+    "你必须在回复的同时，通过调用 remember 工具将其存入记忆库。\n"
+    "2. 遇到需要回忆用户信息的问题时，必须优先调用 recall 工具查询，"
+    "绝不允许凭空捏造。\n"
+    "注意：千万不要只口头答应「我记住了」，却不调用工具。"
+)
+
 _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
 _SYSTEM_CACHE: str | None = None
@@ -92,7 +102,7 @@ async def _chat(event: Event, bot: Bot) -> None:
         history = await _load(bot)
         turns = _messages_of(history.get(conv_id))
     user_content = await _user_content(bot, prompt, event.images)
-    messages = _build_messages(user_content, turns, limit)
+    messages = _build_messages(bot, user_content, turns, limit)
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
@@ -302,10 +312,10 @@ def _payload(
 
 
 def _build_messages(
-    user_content: Any, turns: list[dict[str, str]], limit: int
+    bot: Bot, user_content: Any, turns: list[dict[str, str]], limit: int
 ) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
-    system = _system_prompt()
+    system = _system_prompt(bot)
     if system:
         messages.append({"role": "system", "content": system})
     if limit > 0:
@@ -385,7 +395,7 @@ async def _user_content(bot: Bot, prompt: str, images: list[str]) -> Any:
     return parts
 
 
-def _system_prompt() -> str:
+def _system_prompt(bot: Bot) -> str:
     global _SYSTEM_CACHE
     if _SYSTEM_CACHE is None:
         parts: list[str] = []
@@ -397,6 +407,8 @@ def _system_prompt() -> str:
                 continue
             if text:
                 parts.append(text)
+        if flag_config(bot.config, "mcp_enabled"):
+            parts.append(TOOL_DIRECTIVE)
         _SYSTEM_CACHE = "\n\n".join(parts)
     return _SYSTEM_CACHE
 
