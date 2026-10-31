@@ -48,6 +48,17 @@ DEFAULT_SUBCONSCIOUS_PROMPT = (
 DEFAULT_SUBCONSCIOUS_WINDOW = 60.0
 DEFAULT_SUBCONSCIOUS_MIN_LENGTH = 6
 SUBCONSCIOUS_MAX_TOKENS = 50
+SUBCONSCIOUS_PLACEHOLDERS = {
+    "空字符串",
+    "空",
+    "无",
+    "没有",
+    "无内容",
+    "none",
+    "null",
+    "nil",
+    "empty",
+}
 
 FALLBACK = "AI 思考失败，请稍后再试"
 ECHO_PREFIX = "echo "
@@ -338,7 +349,7 @@ async def _subconscious_memory(
             bot, messages, SUBCONSCIOUS_MAX_TOKENS
         )
         finding = _extract_text(data).strip()
-        if not finding or finding == FALLBACK:
+        if _is_placeholder(finding):
             return
         await _remember(bot, conv_id, finding)
     except asyncio.CancelledError:
@@ -347,7 +358,17 @@ async def _subconscious_memory(
         logger.opt(exception=True).error("潜意识分析失败 conv={}", conv_id)
 
 
+def _is_placeholder(finding: str) -> bool:
+    if not finding or finding == FALLBACK:
+        return True
+    cleaned = finding.strip().strip("\"'“”「」").strip().lower()
+    return not cleaned or cleaned in SUBCONSCIOUS_PLACEHOLDERS
+
+
 async def _remember(bot: Bot, conv_id: str, content: str) -> None:
+    if not await ensure_started(bot):
+        logger.warning("MCP 未启用或启动失败, 放弃潜意识写入 conv={}", conv_id)
+        return
     payload: dict[str, Any] = {
         "jsonrpc": "2.0",
         "id": f"sub-{int(time.time() * 1000)}",
@@ -362,6 +383,9 @@ async def _remember(bot: Bot, conv_id: str, content: str) -> None:
         },
     }
     result = await _mcp_post(bot, payload)
+    if isinstance(result, dict) and "error" in result:
+        logger.warning("潜意识写入失败 conv={} -> {}", conv_id, str(result)[:120])
+        return
     logger.info("潜意识记忆已入库 conv={} -> {}", conv_id, str(result)[:120])
 
 
