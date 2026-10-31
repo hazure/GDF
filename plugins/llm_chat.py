@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import re
 import shutil
 import time
 from collections.abc import Awaitable, Callable
@@ -51,6 +52,14 @@ DEFAULT_SUBCONSCIOUS_PROMPT = (
 DEFAULT_SUBCONSCIOUS_WINDOW = 60.0
 DEFAULT_SUBCONSCIOUS_MIN_LENGTH = 6
 SUBCONSCIOUS_MAX_TOKENS = 50
+DEFAULT_HUMAN_LIKE_PROMPT = (
+    "请用最简短、口语化的方式回复，就像在微信上和朋友聊天。"
+    "绝对不要使用括号进行动作描写，不要有旁白。"
+)
+DEFAULT_MAX_PARTS = 3
+REPLY_INTERVAL = 1.0
+BRACKET_PATTERN = re.compile(r"[（(][^（()）]*[)）]")
+SENTENCE_PATTERN = re.compile(r"[^。！？!?…]+[。！？!?…]*")
 SUBCONSCIOUS_PLACEHOLDERS = {
     "空字符串",
     "空",
@@ -177,7 +186,7 @@ async def _chat(event: Event, bot: Bot) -> None:
             "messages": turns[-2 * limit :] if limit > 0 else [],
         }
         await _save(bot, history)
-    await bot.reply(event, reply)
+    await _send_reply(event, bot, reply)
 
 
 async def _complete(
@@ -474,6 +483,32 @@ async def _cancel_subconscious() -> None:
     _SUB_TASKS.clear()
 
 
+def _clean_brackets(text: str) -> str:
+    cleaned = BRACKET_PATTERN.sub("", text)
+    return " ".join(cleaned.split())
+
+
+def _sentences(text: str) -> list[str]:
+    return [part.strip() for part in SENTENCE_PATTERN.findall(text) if part.strip()]
+
+
+async def _send_reply(event: Event, bot: Bot, reply: str) -> None:
+    if not flag_config(bot.config, "llm_human_like_mode"):
+        await bot.reply(event, reply)
+        return
+    parts = _sentences(_clean_brackets(reply))
+    if not parts:
+        await bot.reply(event, reply)
+        return
+    limit = _int_config(bot, "llm_reply_max_parts", DEFAULT_MAX_PARTS)
+    if limit > 0 and len(parts) > limit:
+        parts = parts[: limit - 1] + ["".join(parts[limit - 1 :])]
+    for index, sentence in enumerate(parts):
+        if index:
+            await asyncio.sleep(REPLY_INTERVAL)
+        await bot.reply(event, sentence)
+
+
 def _payload(
     bot: Bot, messages: list[dict[str, Any]], max_tokens: int | None = None
 ) -> dict[str, Any]:
@@ -600,6 +635,12 @@ def _system_prompt(bot: Bot) -> str:
                 parts.append(text)
         if flag_config(bot.config, "mcp_enabled"):
             parts.append(TOOL_DIRECTIVE)
+        if flag_config(bot.config, "llm_human_like_mode"):
+            human = str(
+                bot.config.get("llm_human_like_prompt") or DEFAULT_HUMAN_LIKE_PROMPT
+            ).strip()
+            if human:
+                parts.append(human)
         _SYSTEM_CACHE = "\n\n".join(parts)
     return _SYSTEM_CACHE
 

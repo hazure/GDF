@@ -48,6 +48,11 @@ llm_subconscious_prompt = "你是后台观察者。当前时间是：{current_ti
 llm_subconscious_window = 60
 llm_subconscious_min_length = 6
 
+# 拟真人格
+llm_human_like_mode = false
+llm_human_like_prompt = "请用最简短、口语化的方式回复，就像在微信上和朋友聊天。绝对不要使用括号进行动作描写，不要有旁白。"
+llm_reply_max_parts = 3
+
 # 日志
 log_retention = "7 days"
 log_dir = "logs"
