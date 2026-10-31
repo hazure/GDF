@@ -54,10 +54,8 @@ def _images_of(data: dict[str, Any]) -> list[str]:
         url = item.get("url")
         if not url:
             continue
-        content_type = str(item.get("content_type") or "")
-        if content_type and not content_type.startswith("image"):
-            continue
         images.append(str(url))
+    print(f"=== 提取到 {len(images)} 张图片", flush=True)
     return images
 
 

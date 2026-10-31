@@ -70,7 +70,11 @@ async def llm_c2c(event: C2CMessage, bot: Bot) -> None:
 
 async def _chat(event: Event, bot: Bot) -> None:
     prompt = event.content.strip()
-    if not prompt or prompt.startswith(ECHO_PREFIX) or prompt == PING_COMMAND:
+    if not prompt and not event.images:
+        return
+    if not prompt:
+        prompt = "[图片]"
+    if prompt.startswith(ECHO_PREFIX) or prompt == PING_COMMAND:
         return
     conv_id = _conv_id(event)
     _ensure_gc(bot)
@@ -247,7 +251,11 @@ async def _download_image(bot: Bot, url: str) -> str | None:
 
 
 async def _user_content(bot: Bot, prompt: str, images: list[str]) -> Any:
-    if not images or not flag_config(bot.config, "llm_vision_enabled"):
+    enabled = flag_config(bot.config, "llm_vision_enabled")
+    print(
+        f"=== vision_enabled={enabled} images={len(images)}", flush=True
+    )
+    if not images or not enabled:
         return prompt
     parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for url in images:
