@@ -47,10 +47,13 @@ def _images_of(data: dict[str, Any]) -> list[str]:
     for item in data.get("attachments") or []:
         if not isinstance(item, dict):
             continue
-        content_type = str(item.get("content_type") or "")
         url = item.get("url")
-        if url and content_type.startswith("image"):
-            images.append(str(url))
+        if not url:
+            continue
+        content_type = str(item.get("content_type") or "")
+        if content_type and not content_type.startswith("image"):
+            continue
+        images.append(str(url))
     return images
 
 
@@ -69,6 +72,7 @@ def _parse_group_at(data: dict[str, Any]) -> GroupAtMessage:
 
 
 def _parse_c2c(data: dict[str, Any]) -> C2CMessage:
+    print("c2c attachments:", data.get("attachments"), flush=True)
     return C2CMessage(
         id=str(data.get("id", "")),
         type=C2C_MESSAGE_CREATE,
