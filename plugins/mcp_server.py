@@ -1,5 +1,6 @@
 import asyncio
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -90,43 +91,58 @@ def _invalid_fact(fact: str) -> bool:
     return bool(letters) and len(letters) >= 4 and all(c.isupper() for c in letters)
 
 
+def _normalize(profile: Any) -> dict[str, Any]:
+    if not isinstance(profile, dict):
+        return {"name": "", "facts": []}
+    raw = profile.get("facts")
+    facts: list[dict[str, str]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if isinstance(item, str):
+            facts.append({"time": "", "content": item})
+        elif isinstance(item, dict):
+            facts.append(
+                {
+                    "time": str(item.get("time") or ""),
+                    "content": str(item.get("content") or ""),
+                }
+            )
+    return {"name": str(profile.get("name") or ""), "facts": facts}
+
+
 async def _tool_remember(
     user_id: str, name: str, args: dict[str, Any]
 ) -> dict[str, Any]:
     fact = str(args.get("fact") or "").strip()
     if _invalid_fact(fact):
         return {"error": "fact 无效, 已拒绝入库"}
+    stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     async with _LOCK:
         data = await _load()
-        profile = data.get(user_id)
-        if not isinstance(profile, dict):
-            profile = {"name": "", "facts": []}
-        facts = profile.get("facts")
-        if not isinstance(facts, list):
-            facts = []
-        if fact not in facts:
-            facts.append(fact)
+        profile = _normalize(data.get(user_id))
+        facts = profile["facts"]
+        if not any(item["content"] == fact for item in facts):
+            facts.append({"time": stamp, "content": fact})
         profile["facts"] = facts[-FACTS_LIMIT:]
         if name:
             profile["name"] = name
         data[user_id] = profile
         await _save(data)
-    return {"ok": True, "user_id": user_id, "name": profile.get("name", ""),
-            "fact": fact, "total": len(profile["facts"])}
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "name": profile["name"],
+        "fact": fact,
+        "time": stamp,
+        "total": len(profile["facts"]),
+    }
 
 
 async def _tool_recall(user_id: str) -> dict[str, Any]:
     async with _LOCK:
         data = await _load()
-        profile = data.get(user_id)
-    if not isinstance(profile, dict):
-        return {"user_id": user_id, "name": "", "facts": []}
-    facts = profile.get("facts")
-    return {
-        "user_id": user_id,
-        "name": profile.get("name", ""),
-        "facts": facts if isinstance(facts, list) else [],
-    }
+        profile = _normalize(data.get(user_id))
+    facts = sorted(profile["facts"], key=lambda item: item["time"], reverse=True)
+    return {"user_id": user_id, "name": profile["name"], "facts": facts}
 
 
 def _rpc_ok(request_id: Any, result: Any) -> dict[str, Any]:

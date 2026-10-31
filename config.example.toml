@@ -44,7 +44,7 @@ mcp_token = ""
 
 # 潜意识旁路
 llm_subconscious_enabled = true
-llm_subconscious_prompt = "你是后台观察者。请提取关于【{user_name}】的重要事实或情绪。输出格式必须为：『{user_name}：提取出的事实』。如果没有任何重要信息，不要输出任何单词，只输出空字符串，绝对不要输出 NONE。"
+llm_subconscious_prompt = "你是后台观察者。当前时间是：{current_time}。请提取关于【{user_name}】的重要事实或情绪，提取事实时，必须带上明确的时间节点（基于系统提供的当前时间推算相对时间）。输出格式必须为：『{user_name}：提取出的事实』。如果没有任何重要信息，不要输出任何单词，只输出空字符串，绝对不要输出 NONE。"
 llm_subconscious_window = 60
 llm_subconscious_min_length = 6
 

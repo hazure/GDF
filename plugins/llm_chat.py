@@ -5,6 +5,7 @@ import shutil
 import time
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,9 @@ IMAGE_TIMEOUT = 15.0
 MAX_TOOL_ROUNDS = 3
 MCP_TIMEOUT = 10.0
 DEFAULT_SUBCONSCIOUS_PROMPT = (
-    "你是后台观察者。请提取关于【{user_name}】的重要事实或情绪。"
+    "你是后台观察者。当前时间是：{current_time}。"
+    "请提取关于【{user_name}】的重要事实或情绪，"
+    "提取事实时，必须带上明确的时间节点（基于系统提供的当前时间推算相对时间）。"
     "输出格式必须为：『{user_name}：提取出的事实』。"
     "如果没有任何重要信息，不要输出任何单词，只输出空字符串，绝对不要输出 NONE。"
 )
@@ -71,6 +74,8 @@ TOOL_DIRECTIVE = (
     "情绪）时，你必须在回复的同时，通过调用 remember 工具把该事实写入档案。\n"
     "2. 当你需要回答关于用户个人偏好、过去发生的事、或者某些重要信息时，"
     "你必须调用 recall 工具查阅该用户的档案，不要凭空瞎猜。\n"
+    "3. recall 返回的每条事实都带 time 字段。若某条事实的时间比较近，"
+    "可以在回复中适时表达关心。\n"
     "注意：千万不要只口头答应「我记住了」，却不调用工具。"
 )
 
@@ -84,7 +89,10 @@ RECALL_HINTS = (
     "记忆",
     "档案",
 )
-RECALL_NOTE = "这是该用户的历史事实，请结合这些事实作答。"
+RECALL_NOTE = (
+    "这是该用户的历史事实（按时间倒序，越靠前越新），请结合这些事实作答；"
+    "时间较近的可适时表达关心。"
+)
 
 _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
@@ -401,7 +409,10 @@ async def _subconscious_memory(
         template = str(
             bot.config.get("llm_subconscious_prompt") or DEFAULT_SUBCONSCIOUS_PROMPT
         )
-        system = template.replace("{user_name}", display_name)
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        system = template.replace("{user_name}", display_name).replace(
+            "{current_time}", current_time
+        )
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
