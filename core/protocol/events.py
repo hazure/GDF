@@ -4,6 +4,7 @@ from typing import Any
 from core.protocol.models import Author, Member
 
 GROUP_AT_MESSAGE_CREATE = "GROUP_AT_MESSAGE_CREATE"
+GROUP_MESSAGE_CREATE = "GROUP_MESSAGE_CREATE"
 C2C_MESSAGE_CREATE = "C2C_MESSAGE_CREATE"
 
 
@@ -33,7 +34,7 @@ def parse_event(payload: dict[str, Any]) -> Event | None:
     data = payload.get("d")
     if not isinstance(event_type, str) or not isinstance(data, dict):
         return None
-    if event_type == GROUP_AT_MESSAGE_CREATE:
+    if event_type in (GROUP_AT_MESSAGE_CREATE, GROUP_MESSAGE_CREATE):
         return _parse_group_at(data)
     if event_type == C2C_MESSAGE_CREATE:
         return _parse_c2c(data)

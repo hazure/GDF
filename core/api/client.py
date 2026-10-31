@@ -11,6 +11,17 @@ SANDBOX_BASE = "https://sandbox.api.sgroup.qq.com"
 TOKEN_SAFETY_SECONDS = 60.0
 DEFAULT_TOKEN_TTL = 7200.0
 TOKEN_PREFIX = "QQBot"
+MSG_SEQ_LIMIT = 1000
+
+_MSG_SEQ: dict[str, int] = {}
+
+
+def _next_msg_seq(msg_id: str) -> int:
+    seq = _MSG_SEQ.get(msg_id, 0) + 1
+    if len(_MSG_SEQ) >= MSG_SEQ_LIMIT:
+        _MSG_SEQ.pop(next(iter(_MSG_SEQ)))
+    _MSG_SEQ[msg_id] = seq
+    return seq
 
 
 class ApiClient:
@@ -78,6 +89,7 @@ class ApiClient:
         payload: dict[str, Any] = {"content": content, "msg_type": 0}
         if msg_id:
             payload["msg_id"] = msg_id
+            payload["msg_seq"] = _next_msg_seq(msg_id)
         return await self.request(
             "POST", f"/v2/groups/{group_openid}/messages", json=payload
         )
@@ -88,6 +100,7 @@ class ApiClient:
         payload: dict[str, Any] = {"content": content, "msg_type": 0}
         if msg_id:
             payload["msg_id"] = msg_id
+            payload["msg_seq"] = _next_msg_seq(msg_id)
         return await self.request("POST", f"/v2/users/{openid}/messages", json=payload)
 
     async def close(self) -> None:

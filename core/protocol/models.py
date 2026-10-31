@@ -11,7 +11,12 @@ class Author:
     @classmethod
     def from_raw(cls, raw: dict[str, Any]) -> "Author":
         return cls(
-            id=str(raw.get("id") or raw.get("member_openid") or ""),
+            id=str(
+                raw.get("id")
+                or raw.get("member_openid")
+                or raw.get("user_openid")
+                or ""
+            ),
             username=raw.get("username"),
             bot=bool(raw.get("bot", False)),
         )
