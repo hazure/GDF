@@ -12,7 +12,7 @@ from loguru import logger
 
 from core.bot import Bot, flag_config
 from core.protocol.events import C2CMessage, Event, GroupAtMessage
-from plugins.mcp_server import TOOL_DEFS, ensure_started
+from plugins.mcp_server import LLM_TOOLS, ensure_started
 
 Handler = Callable[..., Awaitable[None]]
 
@@ -182,7 +182,7 @@ async def _request_with_tools(
 ) -> str:
     working = list(messages)
     for _ in range(MAX_TOOL_ROUNDS):
-        data = await _post_completion(bot, working, max_tokens, TOOL_DEFS)
+        data = await _post_completion(bot, working, max_tokens, LLM_TOOLS)
         choices = data.get("choices") or []
         if not choices:
             raise RuntimeError(f"LLM 响应缺少 choices: {data}")

@@ -45,6 +45,18 @@ TOOL_DEFS: list[dict[str, Any]] = [
 _LOCK = asyncio.Lock()
 _RUNNER: web.AppRunner | None = None
 
+LLM_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": tool["name"],
+            "description": tool["description"],
+            "parameters": tool["inputSchema"],
+        },
+    }
+    for tool in TOOL_DEFS
+]
+
 
 def _memory_path() -> Path:
     path = Path(DEFAULT_MEMORY_PATH)
