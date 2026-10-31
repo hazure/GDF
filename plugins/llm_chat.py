@@ -93,7 +93,6 @@ async def _chat(event: Event, bot: Bot) -> None:
     user_content = await _user_content(bot, prompt, event.images)
     messages = _build_messages(user_content, turns, limit)
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
-    print(f"=== messages[-1]={str(messages[-1])[:500]}", flush=True)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
         reply = await _complete(bot, messages)
@@ -251,11 +250,7 @@ async def _download_image(bot: Bot, url: str) -> str | None:
 
 
 async def _user_content(bot: Bot, prompt: str, images: list[str]) -> Any:
-    enabled = flag_config(bot.config, "llm_vision_enabled")
-    print(
-        f"=== vision_enabled={enabled} images={len(images)}", flush=True
-    )
-    if not images or not enabled:
+    if not images or not flag_config(bot.config, "llm_vision_enabled"):
         return prompt
     parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
     for url in images:
