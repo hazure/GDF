@@ -89,6 +89,7 @@ async def _chat(event: Event, bot: Bot) -> None:
     user_content = await _user_content(bot, prompt, event.images)
     messages = _build_messages(user_content, turns, limit)
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
+    print(f"=== messages[-1]={str(messages[-1])[:500]}", flush=True)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
         reply = await _complete(bot, messages)

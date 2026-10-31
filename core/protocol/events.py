@@ -43,6 +43,10 @@ def parse_event(payload: dict[str, Any]) -> Event | None:
 
 
 def _images_of(data: dict[str, Any]) -> list[str]:
+    print(
+        f"=== 触发 _images_of, attachments={data.get('attachments')}",
+        flush=True,
+    )
     images: list[str] = []
     for item in data.get("attachments") or []:
         if not isinstance(item, dict):
