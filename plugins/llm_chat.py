@@ -4,6 +4,7 @@ import json
 import shutil
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,14 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_TIMEOUT = 15.0
 MAX_TOOL_ROUNDS = 3
 MCP_TIMEOUT = 10.0
+DEFAULT_SUBCONSCIOUS_PROMPT = (
+    "你是一个后台的潜意识观察者。请阅读以下对话，如果包含关于用户的重要事实、"
+    "喜好、计划或情绪（例如：考试、日程、喜好、讨厌的事），请提取出来。"
+    "如果没有，返回空字符串。"
+)
+DEFAULT_SUBCONSCIOUS_WINDOW = 60.0
+DEFAULT_SUBCONSCIOUS_MIN_LENGTH = 6
+SUBCONSCIOUS_MAX_TOKENS = 50
 
 FALLBACK = "AI 思考失败，请稍后再试"
 ECHO_PREFIX = "echo "
@@ -58,6 +67,8 @@ _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
 _SYSTEM_CACHE: str | None = None
 _RATE: dict[str, list[float]] = {}
+_SUB_TASKS: set[asyncio.Task[None]] = set()
+_SUB_CLOCK: dict[str, float] = {}
 
 
 def on_group_at(func: Handler) -> Handler:
@@ -92,9 +103,11 @@ async def _chat(event: Event, bot: Bot) -> None:
     _ensure_gc(bot)
     if not await _should_reply(event, bot, prompt):
         logger.info("唤醒判断未通过，跳过回复 conv={}", conv_id)
+        _spawn_subconscious(event, bot, prompt, conv_id)
         return
     if not await _allow(bot, conv_id):
         logger.warning("触发频控, 静默跳过 conv={}", conv_id)
+        _spawn_subconscious(event, bot, prompt, conv_id)
         return
     logger.info("收到 [{}] 消息: {}", event.type, prompt[:50])
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
@@ -281,6 +294,84 @@ def _tool_text(result: Any) -> str:
         if "error" in result:
             return json.dumps(result["error"], ensure_ascii=False)
     return json.dumps(result, ensure_ascii=False)
+
+
+def _spawn_subconscious(
+    event: Event, bot: Bot, prompt: str, conv_id: str
+) -> None:
+    if not flag_config(bot.config, "llm_subconscious_enabled"):
+        return
+    if not flag_config(bot.config, "mcp_enabled"):
+        return
+    min_length = _int_config(
+        bot, "llm_subconscious_min_length", DEFAULT_SUBCONSCIOUS_MIN_LENGTH
+    )
+    if len(prompt) < min_length:
+        return
+    window = _float_config(
+        bot, "llm_subconscious_window", DEFAULT_SUBCONSCIOUS_WINDOW
+    )
+    now = time.monotonic()
+    if now - _SUB_CLOCK.get(conv_id, 0.0) < window:
+        return
+    _SUB_CLOCK[conv_id] = now
+    if not getattr(bot, "_sub_shutdown_registered", False):
+        bot.on_shutdown(_cancel_subconscious)
+        setattr(bot, "_sub_shutdown_registered", True)
+    task = asyncio.create_task(_subconscious_memory(event, bot, prompt, conv_id))
+    _SUB_TASKS.add(task)
+    task.add_done_callback(_SUB_TASKS.discard)
+
+
+async def _subconscious_memory(
+    event: Event, bot: Bot, prompt: str, conv_id: str
+) -> None:
+    try:
+        system = str(
+            bot.config.get("llm_subconscious_prompt") or DEFAULT_SUBCONSCIOUS_PROMPT
+        )
+        messages: list[dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ]
+        data = await _post_completion(
+            bot, messages, SUBCONSCIOUS_MAX_TOKENS
+        )
+        finding = _extract_text(data).strip()
+        if not finding or finding == FALLBACK:
+            return
+        await _remember(bot, conv_id, finding)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.opt(exception=True).error("潜意识分析失败 conv={}", conv_id)
+
+
+async def _remember(bot: Bot, conv_id: str, content: str) -> None:
+    payload: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "id": f"sub-{int(time.time() * 1000)}",
+        "method": "tools/call",
+        "params": {
+            "name": "remember",
+            "arguments": {
+                "key": f"潜意识-{int(time.time())}",
+                "content": content,
+            },
+            "user_openid": conv_id,
+        },
+    }
+    result = await _mcp_post(bot, payload)
+    logger.info("潜意识记忆已入库 conv={} -> {}", conv_id, str(result)[:120])
+
+
+async def _cancel_subconscious() -> None:
+    for task in list(_SUB_TASKS):
+        task.cancel()
+    for task in list(_SUB_TASKS):
+        with suppress(asyncio.CancelledError):
+            await task
+    _SUB_TASKS.clear()
 
 
 def _payload(
