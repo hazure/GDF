@@ -1,7 +1,6 @@
 import asyncio
 import base64
 import json
-import re
 import shutil
 import time
 from collections.abc import Awaitable, Callable
@@ -77,9 +76,6 @@ TOOL_DIRECTIVE = (
     "你必须调用 recall 工具查阅该用户的档案，不要凭空瞎猜。\n"
     "3. recall 返回的每条事实都带 time 字段。若某条事实的时间比较近，"
     "可以在回复中适时表达关心。\n"
-    "4. 当用户问你在想什么、或要求展示思绪时，你可以先输出 "
-    "「[思绪：你的内心活动]」，然后再输出正常的回复。"
-    "思绪要符合你当前的角色性格，且不超过 50 字。\n"
     "注意：千万不要只口头答应「我记住了」，却不调用工具。"
 )
 
@@ -97,12 +93,6 @@ RECALL_NOTE = (
     "这是该用户的历史事实（按时间倒序，越靠前越新），请结合这些事实作答；"
     "时间较近的可适时表达关心。"
 )
-
-DEFAULT_THOUGHT_MODE = "easter_egg"
-DEFAULT_THOUGHT_MAX_CHARS = 120
-DEFAULT_THOUGHT_HINTS = ("思绪", "在想什么", "内心", "思考过程")
-THOUGHT_TAG = re.compile(r"<thought>(.*?)</thought>", re.S)
-THOUGHT_BRACKET = re.compile(r"^\s*[\[【]思绪[:：](.*?)[\]】]", re.S)
 
 _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
@@ -162,7 +152,7 @@ async def _chat(event: Event, bot: Bot) -> None:
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
-        thought, reply = await _complete(
+        reply = await _complete(
             bot,
             messages,
             conv_id=conv_id,
@@ -177,7 +167,6 @@ async def _chat(event: Event, bot: Bot) -> None:
         await bot.reply(event, FALLBACK)
         return
     logger.info("LLM 回复成功: {}...", reply[:30])
-    await _send_reply(event, bot, prompt, thought, reply)
     async with _HISTORY_LOCK:
         history = await _load(bot)
         turns = _messages_of(history.get(conv_id))
@@ -188,23 +177,6 @@ async def _chat(event: Event, bot: Bot) -> None:
             "messages": turns[-2 * limit :] if limit > 0 else [],
         }
         await _save(bot, history)
-
-
-async def _send_reply(
-    event: Event, bot: Bot, prompt: str, thought: str, reply: str
-) -> None:
-    mode = str(bot.config.get("llm_thought_mode") or DEFAULT_THOUGHT_MODE)
-    mode = mode.strip().lower()
-    limit = _int_config(bot, "llm_thought_max_chars", DEFAULT_THOUGHT_MAX_CHARS)
-    hints = bot.config.get("llm_thought_hints")
-    if not isinstance(hints, list):
-        hints = list(DEFAULT_THOUGHT_HINTS)
-    shown = thought.strip()[:limit] if thought else ""
-    if shown and mode == "easter_egg":
-        if any(str(word) in prompt for word in hints):
-            await bot.reply(event, f"【思绪：{shown}】")
-    elif shown and mode == "prefix":
-        reply = f"【思绪：{shown}】\n{reply}"
     await bot.reply(event, reply)
 
 
@@ -216,13 +188,13 @@ async def _complete(
     user_id: str = "",
     display_name: str = "",
     prompt: str = "",
-) -> tuple[str, str]:
+) -> str:
     if conv_id and await ensure_started(bot):
         return await _request_with_tools(
             bot, messages, user_id, display_name, prompt, max_tokens
         )
     data = await _post_completion(bot, messages, max_tokens)
-    return _extract(data)
+    return _extract_text(data)
 
 
 async def _post_completion(
@@ -263,27 +235,12 @@ async def _post_completion(
     return data
 
 
-def _split_thought(message: dict[str, Any]) -> tuple[str, str]:
-    content = str(message.get("content") or "")
-    reasoning = str(message.get("reasoning_content") or "").strip()
-    if reasoning:
-        return reasoning, content.strip()
-    match = THOUGHT_TAG.search(content)
-    if match:
-        return match.group(1).strip(), THOUGHT_TAG.sub("", content).strip()
-    match = THOUGHT_BRACKET.match(content)
-    if match:
-        return match.group(1).strip(), content[match.end() :].strip()
-    return "", content.strip()
-
-
-def _extract(data: dict[str, Any]) -> tuple[str, str]:
+def _extract_text(data: dict[str, Any]) -> str:
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError(f"LLM 响应缺少 choices: {data}")
     message = choices[0].get("message") or {}
-    thought, reply = _split_thought(message)
-    return thought, reply or FALLBACK
+    return str(message.get("content") or "").strip() or FALLBACK
 
 
 async def _request_with_tools(
@@ -293,7 +250,7 @@ async def _request_with_tools(
     display_name: str = "",
     prompt: str = "",
     max_tokens: int | None = None,
-) -> tuple[str, str]:
+) -> str:
     working = list(messages)
     choice = _tool_choice(prompt)
     for _ in range(MAX_TOOL_ROUNDS):
@@ -314,7 +271,7 @@ async def _request_with_tools(
         message = choices[0].get("message") or {}
         calls = message.get("tool_calls") or []
         if not calls:
-            return _extract(data)
+            return str(message.get("content") or "").strip() or FALLBACK
         working.append(
             {
                 "role": "assistant",
@@ -463,8 +420,7 @@ async def _subconscious_memory(
         data = await _post_completion(
             bot, messages, SUBCONSCIOUS_MAX_TOKENS
         )
-        _thought, finding = _extract(data)
-        finding = finding.strip()
+        finding = _extract_text(data).strip()
         if _is_placeholder(finding):
             return
         await _remember(bot, user_id, display_name, finding)
@@ -588,7 +544,7 @@ async def _eval_reply(bot: Bot, prompt: str) -> bool:
     except Exception:
         logger.opt(exception=True).error("唤醒判断失败, 本轮按不回复处理")
         return False
-    return answer[1].strip().upper().startswith("YES")
+    return answer.strip().upper().startswith("YES")
 
 
 async def _download_image(bot: Bot, url: str) -> str | None:
