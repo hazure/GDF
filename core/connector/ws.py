@@ -96,6 +96,11 @@ class WsConnector:
         if isinstance(seq, int):
             self._seq = seq
         if op == OP_DISPATCH:
+            print(
+                f"[probe] {payload.get('t')} "
+                f"attachments={(payload.get('d') or {}).get('attachments')}",
+                flush=True,
+            )
             if payload.get("t") == "READY":
                 session_id = (payload.get("d") or {}).get("session_id")
                 if isinstance(session_id, str):
