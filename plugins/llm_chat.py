@@ -42,7 +42,8 @@ MAX_TOOL_ROUNDS = 3
 MCP_TIMEOUT = 10.0
 DEFAULT_SUBCONSCIOUS_PROMPT = (
     "你是后台观察者。请提取关于【{user_name}】的重要事实或情绪。"
-    "输出格式必须为：『{user_name}：提取出的事实』。如果没有重要信息，输出 NONE。"
+    "输出格式必须为：『{user_name}：提取出的事实』。"
+    "如果没有任何重要信息，不要输出任何单词，只输出空字符串，绝对不要输出 NONE。"
 )
 DEFAULT_SUBCONSCIOUS_WINDOW = 60.0
 DEFAULT_SUBCONSCIOUS_MIN_LENGTH = 6
@@ -421,8 +422,12 @@ async def _subconscious_memory(
 def _is_placeholder(finding: str) -> bool:
     if not finding or finding == FALLBACK:
         return True
-    cleaned = finding.strip().strip("\"'“”「」").strip().lower()
-    return not cleaned or cleaned in SUBCONSCIOUS_PLACEHOLDERS
+    cleaned = finding.strip().strip("\"'“”「」").strip()
+    if not cleaned:
+        return True
+    if cleaned.lower() in SUBCONSCIOUS_PLACEHOLDERS:
+        return True
+    return "NONE" in cleaned.upper()
 
 
 async def _remember(

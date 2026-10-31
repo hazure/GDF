@@ -81,12 +81,21 @@ async def _save(data: dict[str, dict[str, Any]]) -> None:
     await asyncio.to_thread(tmp.replace, path)
 
 
+def _invalid_fact(fact: str) -> bool:
+    if len(fact) < 3:
+        return True
+    if "NONE" in fact.upper():
+        return True
+    letters = [char for char in fact if char.isalpha()]
+    return bool(letters) and len(letters) >= 4 and all(c.isupper() for c in letters)
+
+
 async def _tool_remember(
     user_id: str, name: str, args: dict[str, Any]
 ) -> dict[str, Any]:
     fact = str(args.get("fact") or "").strip()
-    if not fact:
-        return {"error": "fact 不能为空"}
+    if _invalid_fact(fact):
+        return {"error": "fact 无效, 已拒绝入库"}
     async with _LOCK:
         data = await _load()
         profile = data.get(user_id)
