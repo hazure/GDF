@@ -1,4 +1,3 @@
-import json
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -73,11 +72,6 @@ def _parse_group_at(data: dict[str, Any]) -> GroupAtMessage:
 
 
 def _parse_c2c(data: dict[str, Any]) -> C2CMessage:
-    print(
-        "=== C2C RAW DATA ===",
-        json.dumps(data, ensure_ascii=False),
-        flush=True,
-    )
     return C2CMessage(
         id=str(data.get("id", "")),
         type=C2C_MESSAGE_CREATE,
