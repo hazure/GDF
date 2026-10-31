@@ -56,6 +56,11 @@ async def run(config: dict[str, Any], with_console: bool) -> None:
             with suppress(asyncio.CancelledError):
                 await console
         await api.close()
+        for cleanup in bot.cleanups:
+            try:
+                await cleanup()
+            except Exception:
+                logger.opt(exception=True).error("插件清理失败")
         if console is None:
             print("机器人已退出", flush=True)
 

@@ -142,6 +142,40 @@ llm_vision_enabled = true
 
 注意：QQ 图片链接带 `rkey` 时效签名，无法直接透传给第三方服务，因此必须下载转码。使用前请确认 `llm_model` 为多模态模型（如 `gpt-4o`、`qwen-vl-max`），`deepseek-chat` 等纯文本模型收到图片段会返回 400，此时把 `llm_vision_enabled` 置 `false`。
 
+## MCP 长期记忆（可选）
+
+`mcp_enabled = true` 时，`plugins/mcp_server.py` 会在 `127.0.0.1:8080/mcp` 起一个 MCP-lite 服务，向模型暴露两个工具：
+
+| 工具 | 作用 |
+|---|---|
+| `remember(key, content)` | 写入一条长期记忆 |
+| `recall(key)` | 按 key 前缀检索，返回列表 |
+
+配置：
+
+```toml
+mcp_enabled = false          # 默认关闭
+mcp_host = "127.0.0.1"       # 只绑本地
+mcp_port = 8080
+mcp_token = ""               # 非空时校验 Bearer
+```
+
+架构：
+
+- 服务端为原生 aiohttp + JSON-RPC 2.0，支持 `initialize` / `tools/list` / `tools/call`，未实现 SSE，标准 MCP 客户端（Claude Desktop 等）连不上。
+- 记忆存于 `data/long_term_memory.json`，按 `user_openid` 隔离命名空间，写入走 lock + tmp + replace。
+- `user_openid` 由插件侧强制注入，模型无法在 arguments 中伪造他人身份。
+- `llm_chat` 在启用时把工具定义注入 `payload["tools"]`，收到 `tool_calls` 后回调本服务，结果以 `role="tool"` 塞回上下文再次请求，最多 3 轮。
+- 服务在首次请求时懒启动，进程退出时经 `bot.on_shutdown` 自动关闭。
+
+启用前请先确认端口未被占用：
+
+```
+curl -s -X POST http://127.0.0.1:8080/mcp \
+  -H 'Content-Type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
 ## 数据与日志
 
 ```

@@ -36,6 +36,12 @@ llm_wake_keywords = ["诺喵莉", "喵莉"]
 llm_eval_prompt = "你需要判断是否需要回复这句话。只输出 YES 或 NO。"
 llm_vision_enabled = true
 
+# MCP 长期记忆服务
+mcp_enabled = false
+mcp_host = "127.0.0.1"
+mcp_port = 8080
+mcp_token = ""
+
 # 日志
 log_retention = "7 days"
 log_dir = "logs"

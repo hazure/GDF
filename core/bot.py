@@ -1,8 +1,10 @@
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from core.api.client import ApiClient
 from core.emitter import Emitter
 from core.protocol.events import C2CMessage, Event, GroupAtMessage
+
+Cleanup = Callable[[], Awaitable[None]]
 
 
 def flag_config(config: dict[str, Any], key: str) -> bool:
@@ -19,6 +21,10 @@ class Bot:
         self.api = api
         self.emitter = emitter
         self.config = config
+        self.cleanups: list[Cleanup] = []
+
+    def on_shutdown(self, func: Cleanup) -> None:
+        self.cleanups.append(func)
 
     async def dispatch(self, event: Event) -> None:
         await self.emitter.dispatch(event, self)

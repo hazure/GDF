@@ -12,6 +12,7 @@ from loguru import logger
 
 from core.bot import Bot, flag_config
 from core.protocol.events import C2CMessage, Event, GroupAtMessage
+from plugins.mcp_server import TOOL_DEFS, ensure_started
 
 Handler = Callable[..., Awaitable[None]]
 
@@ -36,6 +37,8 @@ DEFAULT_WAKE_KEYWORDS = ("诺喵莉", "喵莉")
 DEFAULT_EVAL_PROMPT = "你需要判断是否需要回复这句话。只输出 YES 或 NO。"
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_TIMEOUT = 15.0
+MAX_TOOL_ROUNDS = 3
+MCP_TIMEOUT = 10.0
 
 FALLBACK = "AI 思考失败，请稍后再试"
 ECHO_PREFIX = "echo "
@@ -93,7 +96,7 @@ async def _chat(event: Event, bot: Bot) -> None:
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
-        reply = await _complete(bot, messages)
+        reply = await _complete(bot, messages, conv_id=conv_id)
     except Exception:
         logger.opt(exception=True).error(
             "LLM 请求失败 conv={} event={}", conv_id, event.type
@@ -115,14 +118,32 @@ async def _chat(event: Event, bot: Bot) -> None:
 
 
 async def _complete(
-    bot: Bot, messages: list[dict[str, Any]], max_tokens: int | None = None
+    bot: Bot,
+    messages: list[dict[str, Any]],
+    max_tokens: int | None = None,
+    conv_id: str = "",
 ) -> str:
+    if conv_id and await ensure_started(bot):
+        return await _request_with_tools(bot, messages, conv_id, max_tokens)
+    data = await _post_completion(bot, messages, max_tokens)
+    return _extract_text(data)
+
+
+async def _post_completion(
+    bot: Bot,
+    messages: list[dict[str, Any]],
+    max_tokens: int | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     api_key = str(bot.config.get("llm_api_key") or "")
     if not api_key:
         raise RuntimeError("config.toml 缺少 llm_api_key")
     base_url = str(bot.config.get("llm_base_url") or DEFAULT_BASE_URL).rstrip("/")
     timeout = _float_config(bot, "llm_timeout", DEFAULT_TIMEOUT)
     payload = _payload(bot, messages, max_tokens)
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     session = await bot.api.session()
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -142,11 +163,114 @@ async def _complete(
             raise RuntimeError(f"LLM status={resp.status} body={str(data)[:200]}")
     if not isinstance(data, dict):
         raise RuntimeError(f"LLM 响应非对象: {data}")
+    return data
+
+
+def _extract_text(data: dict[str, Any]) -> str:
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError(f"LLM 响应缺少 choices: {data}")
     message = choices[0].get("message") or {}
     return str(message.get("content") or "").strip() or FALLBACK
+
+
+async def _request_with_tools(
+    bot: Bot,
+    messages: list[dict[str, Any]],
+    conv_id: str,
+    max_tokens: int | None = None,
+) -> str:
+    working = list(messages)
+    for _ in range(MAX_TOOL_ROUNDS):
+        data = await _post_completion(bot, working, max_tokens, TOOL_DEFS)
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"LLM 响应缺少 choices: {data}")
+        message = choices[0].get("message") or {}
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return str(message.get("content") or "").strip() or FALLBACK
+        working.append(
+            {
+                "role": "assistant",
+                "content": message.get("content") or "",
+                "tool_calls": calls,
+            }
+        )
+        for call in calls:
+            working.append(await _exec_tool(bot, conv_id, call))
+    raise RuntimeError("工具调用轮次超限")
+
+
+async def _exec_tool(
+    bot: Bot, conv_id: str, call: dict[str, Any]
+) -> dict[str, Any]:
+    call_id = str(call.get("id") or "")
+    function = call.get("function") or {}
+    name = str(function.get("name") or "")
+    raw = function.get("arguments")
+    try:
+        arguments = json.loads(raw) if isinstance(raw, str) and raw else {}
+    except json.JSONDecodeError:
+        arguments = {}
+    if not isinstance(arguments, dict):
+        arguments = {}
+    payload: dict[str, Any] = {
+        "jsonrpc": "2.0",
+        "id": call_id or name,
+        "method": "tools/call",
+        "params": {
+            "name": name,
+            "arguments": arguments,
+            "user_openid": conv_id,
+        },
+    }
+    result = await _mcp_post(bot, payload)
+    logger.info("MCP 调用 {} -> {}", name, str(result)[:120])
+    return {
+        "role": "tool",
+        "tool_call_id": call_id,
+        "content": _tool_text(result),
+    }
+
+
+async def _mcp_post(bot: Bot, payload: dict[str, Any]) -> Any:
+    host = str(bot.config.get("mcp_host") or "127.0.0.1")
+    port = _int_config(bot, "mcp_port", 8080)
+    token = str(bot.config.get("mcp_token") or "").strip()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    session = await bot.api.session()
+    try:
+        async with session.post(
+            f"http://{host}:{port}/mcp",
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=MCP_TIMEOUT),
+        ) as resp:
+            return await resp.json(content_type=None)
+    except Exception:
+        logger.opt(exception=True).error(
+            "MCP 请求失败 tool={}", (payload.get("params") or {}).get("name")
+        )
+        return {"error": "MCP 请求失败"}
+
+
+def _tool_text(result: Any) -> str:
+    if isinstance(result, dict):
+        body = result.get("result")
+        if isinstance(body, dict):
+            texts = [
+                str(item.get("text"))
+                for item in body.get("content") or []
+                if isinstance(item, dict) and item.get("text")
+            ]
+            if texts:
+                return "\n".join(texts)
+        if "error" in result:
+            return json.dumps(result["error"], ensure_ascii=False)
+    return json.dumps(result, ensure_ascii=False)
 
 
 def _payload(
