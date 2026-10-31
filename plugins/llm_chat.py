@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import json
 import shutil
 import time
@@ -9,7 +10,7 @@ from typing import Any
 import aiohttp
 from loguru import logger
 
-from core.bot import Bot
+from core.bot import Bot, flag_config
 from core.protocol.events import C2CMessage, Event, GroupAtMessage
 
 Handler = Callable[..., Awaitable[None]]
@@ -30,6 +31,11 @@ DEFAULT_MAX_CONCURRENCY = 3
 DEFAULT_CONCURRENCY_WINDOW = 60.0
 DEFAULT_MEMORY_GC_DAYS = 7
 DEFAULT_MEMORY_GC_INTERVAL = 86400.0
+DEFAULT_REPLY_MODE = "smart"
+DEFAULT_WAKE_KEYWORDS = ("诺喵莉", "喵莉")
+DEFAULT_EVAL_PROMPT = "你需要判断是否需要回复这句话。只输出 YES 或 NO。"
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+IMAGE_TIMEOUT = 15.0
 
 FALLBACK = "AI 思考失败，请稍后再试"
 RATE_LIMIT_TEXT = "请求太频繁，请稍后再试"
@@ -72,11 +78,15 @@ async def _chat(event: Event, bot: Bot) -> None:
         logger.warning("触发频控 conv={}", conv_id)
         await bot.reply(event, RATE_LIMIT_TEXT)
         return
+    if not await _should_reply(event, bot, prompt):
+        logger.info("唤醒判断未通过 conv={}", conv_id)
+        return
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
     async with _HISTORY_LOCK:
         history = await _load(bot)
         turns = _messages_of(history.get(conv_id))
-    messages = _build_messages(prompt, turns, limit)
+    user_content = await _user_content(bot, prompt, event.images)
+    messages = _build_messages(user_content, turns, limit)
     try:
         reply = await _complete(bot, messages)
     except Exception:
@@ -98,13 +108,15 @@ async def _chat(event: Event, bot: Bot) -> None:
     await bot.reply(event, reply)
 
 
-async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
+async def _complete(
+    bot: Bot, messages: list[dict[str, Any]], max_tokens: int | None = None
+) -> str:
     api_key = str(bot.config.get("llm_api_key") or "")
     if not api_key:
         raise RuntimeError("config.toml 缺少 llm_api_key")
     base_url = str(bot.config.get("llm_base_url") or DEFAULT_BASE_URL).rstrip("/")
     timeout = _float_config(bot, "llm_timeout", DEFAULT_TIMEOUT)
-    payload = _payload(bot, messages)
+    payload = _payload(bot, messages, max_tokens)
     session = await bot.api.session()
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -128,14 +140,20 @@ async def _complete(bot: Bot, messages: list[dict[str, str]]) -> str:
     return str(message.get("content") or "").strip() or FALLBACK
 
 
-def _payload(bot: Bot, messages: list[dict[str, str]]) -> dict[str, Any]:
+def _payload(
+    bot: Bot, messages: list[dict[str, Any]], max_tokens: int | None = None
+) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "model": str(bot.config.get("llm_model") or DEFAULT_MODEL),
         "messages": messages,
         "stream": False,
         "temperature": _float_config(bot, "llm_temperature", DEFAULT_TEMPERATURE),
         "top_p": _float_config(bot, "llm_top_p", DEFAULT_TOP_P),
-        "max_tokens": _int_config(bot, "llm_max_tokens", DEFAULT_MAX_TOKENS),
+        "max_tokens": (
+            max_tokens
+            if max_tokens is not None
+            else _int_config(bot, "llm_max_tokens", DEFAULT_MAX_TOKENS)
+        ),
     }
     thinking = str(bot.config.get("llm_thinking") or "").strip()
     if thinking:
@@ -151,16 +169,85 @@ def _payload(bot: Bot, messages: list[dict[str, str]]) -> dict[str, Any]:
 
 
 def _build_messages(
-    prompt: str, turns: list[dict[str, str]], limit: int
-) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = []
+    user_content: Any, turns: list[dict[str, str]], limit: int
+) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
     system = _system_prompt()
     if system:
         messages.append({"role": "system", "content": system})
     if limit > 0:
         messages.extend(turns[-2 * limit :])
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": user_content})
     return messages
+
+
+async def _should_reply(event: Event, bot: Bot, prompt: str) -> bool:
+    if isinstance(event, C2CMessage):
+        return True
+    mode = str(bot.config.get("llm_reply_mode") or DEFAULT_REPLY_MODE).strip().lower()
+    if mode == "always":
+        return True
+    if mode == "keyword":
+        return _has_keyword(bot, prompt)
+    return await _eval_reply(bot, prompt)
+
+
+def _has_keyword(bot: Bot, prompt: str) -> bool:
+    keywords = bot.config.get("llm_wake_keywords")
+    if not isinstance(keywords, list):
+        keywords = list(DEFAULT_WAKE_KEYWORDS)
+    return any(str(word) and str(word) in prompt for word in keywords)
+
+
+async def _eval_reply(bot: Bot, prompt: str) -> bool:
+    system = str(bot.config.get("llm_eval_prompt") or DEFAULT_EVAL_PROMPT)
+    messages: list[dict[str, Any]] = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        answer = await _complete(bot, messages, max_tokens=8)
+    except Exception:
+        logger.opt(exception=True).error("唤醒判断失败, 本轮按不回复处理")
+        return False
+    return answer.strip().upper().startswith("YES")
+
+
+async def _download_image(bot: Bot, url: str) -> str | None:
+    session = await bot.api.session()
+    try:
+        async with session.get(
+            url, timeout=aiohttp.ClientTimeout(total=IMAGE_TIMEOUT)
+        ) as resp:
+            if resp.status >= 400:
+                logger.warning("图片下载失败 status={}", resp.status)
+                return None
+            content_type = resp.headers.get("Content-Type", "image/jpeg")
+            data = await resp.content.read(MAX_IMAGE_BYTES + 1)
+    except Exception:
+        logger.opt(exception=True).error("图片下载异常")
+        return None
+    if not data:
+        return None
+    if len(data) > MAX_IMAGE_BYTES:
+        logger.warning("图片超过 {} 字节上限, 已忽略", MAX_IMAGE_BYTES)
+        return None
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{content_type};base64,{encoded}"
+
+
+async def _user_content(bot: Bot, prompt: str, images: list[str]) -> Any:
+    if not images or not flag_config(bot.config, "llm_vision_enabled"):
+        return prompt
+    parts: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    for url in images:
+        data_url = await _download_image(bot, url)
+        if data_url is None:
+            continue
+        parts.append({"type": "image_url", "image_url": {"url": data_url}})
+    if len(parts) == 1:
+        return prompt
+    return parts
 
 
 def _system_prompt() -> str:

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from core.protocol.models import Author, Member
@@ -10,23 +10,24 @@ C2C_MESSAGE_CREATE = "C2C_MESSAGE_CREATE"
 
 @dataclass(slots=True)
 class Event:
-    id: str
-    type: str
-    content: str
-    timestamp: str
-    raw: dict[str, Any]
+    id: str = ""
+    type: str = ""
+    content: str = ""
+    timestamp: str = ""
+    raw: dict[str, Any] = field(default_factory=dict)
+    images: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
 class GroupAtMessage(Event):
-    group_openid: str
-    author: Author
-    member: Member
+    group_openid: str = ""
+    author: Author = field(default_factory=Author)
+    member: Member = field(default_factory=Member)
 
 
 @dataclass(slots=True)
 class C2CMessage(Event):
-    author: Author
+    author: Author = field(default_factory=Author)
 
 
 def parse_event(payload: dict[str, Any]) -> Event | None:
@@ -41,6 +42,18 @@ def parse_event(payload: dict[str, Any]) -> Event | None:
     return None
 
 
+def _images_of(data: dict[str, Any]) -> list[str]:
+    images: list[str] = []
+    for item in data.get("attachments") or []:
+        if not isinstance(item, dict):
+            continue
+        content_type = str(item.get("content_type") or "")
+        url = item.get("url")
+        if url and content_type.startswith("image"):
+            images.append(str(url))
+    return images
+
+
 def _parse_group_at(data: dict[str, Any]) -> GroupAtMessage:
     return GroupAtMessage(
         id=str(data.get("id", "")),
@@ -48,6 +61,7 @@ def _parse_group_at(data: dict[str, Any]) -> GroupAtMessage:
         content=str(data.get("content", "")),
         timestamp=str(data.get("timestamp", "")),
         raw=data,
+        images=_images_of(data),
         group_openid=str(data.get("group_openid", "")),
         author=Author.from_raw(data.get("author") or {}),
         member=Member.from_raw(data.get("member") or {}),
@@ -61,5 +75,6 @@ def _parse_c2c(data: dict[str, Any]) -> C2CMessage:
         content=str(data.get("content", "")),
         timestamp=str(data.get("timestamp", "")),
         raw=data,
+        images=_images_of(data),
         author=Author.from_raw(data.get("author") or {}),
     )

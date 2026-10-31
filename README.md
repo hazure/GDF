@@ -112,6 +112,36 @@ tail -f logs/info_$(date +%F).log
 tail -f logs/error_$(date +%F).log
 ```
 
+## 智能唤醒策略
+
+群里不加区分地回复会刷屏，用 `llm_reply_mode` 控制何时开口：
+
+```toml
+llm_reply_mode = "smart"                        # smart / always / keyword
+llm_wake_keywords = ["诺喵莉", "喵莉"]           # keyword 模式的触发词
+llm_eval_prompt = "你需要判断是否需要回复这句话。只输出 YES 或 NO。"
+```
+
+| 模式 | 行为 |
+|---|---|
+| `always` | 群内每条 @ 都回复 |
+| `keyword` | 内容含任一唤醒词才回复，零额外请求 |
+| `smart` | 先发一次极小请求（`max_tokens=8`）让模型判定，返回 YES 才回复 |
+
+私聊不受该开关影响，始终回复。`smart` 的判定请求不进历史、不占频控配额，失败按「不回复」处理。空白内容与 `echo ` / `ping` 命令式消息在判定前即被拦截。
+
+## 多模态图片识别
+
+`llm_vision_enabled = true` 时，消息中的图片会被下载并转成 Base64 Data URL 随正文一起发出。
+
+```toml
+llm_vision_enabled = true
+```
+
+流程：从事件的 `attachments` 中筛出 `content_type` 为 `image/*` 的项，用框架共享连接池下载，单张上限 5MB，超出则忽略并记 WARNING，转码后构造标准 `image_url` 段，多张依次追加。
+
+注意：QQ 图片链接带 `rkey` 时效签名，无法直接透传给第三方服务，因此必须下载转码。使用前请确认 `llm_model` 为多模态模型（如 `gpt-4o`、`qwen-vl-max`），`deepseek-chat` 等纯文本模型收到图片段会返回 400，此时把 `llm_vision_enabled` 置 `false`。
+
 ## 数据与日志
 
 ```
