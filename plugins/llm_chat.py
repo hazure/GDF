@@ -38,7 +38,6 @@ MAX_IMAGE_BYTES = 5 * 1024 * 1024
 IMAGE_TIMEOUT = 15.0
 
 FALLBACK = "AI 思考失败，请稍后再试"
-RATE_LIMIT_TEXT = "请求太频繁，请稍后再试"
 ECHO_PREFIX = "echo "
 PING_COMMAND = "ping"
 
@@ -78,12 +77,11 @@ async def _chat(event: Event, bot: Bot) -> None:
         return
     conv_id = _conv_id(event)
     _ensure_gc(bot)
-    if not await _allow(bot, conv_id):
-        logger.warning("触发频控 conv={}", conv_id)
-        await bot.reply(event, RATE_LIMIT_TEXT)
-        return
     if not await _should_reply(event, bot, prompt):
         logger.info("唤醒判断未通过，跳过回复 conv={}", conv_id)
+        return
+    if not await _allow(bot, conv_id):
+        logger.warning("触发频控, 静默跳过 conv={}", conv_id)
         return
     logger.info("收到 [{}] 消息: {}", event.type, prompt[:50])
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
