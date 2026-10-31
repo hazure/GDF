@@ -100,7 +100,7 @@ class WsConnector:
                 session_id = (payload.get("d") or {}).get("session_id")
                 if isinstance(session_id, str):
                     self._session_id = session_id
-                    logger.debug("READY 会话已建立 session={}", session_id)
+                    logger.info("READY 会话已建立 session={}", session_id)
             event = parse_event(payload)
             if event is not None:
                 await self._bot.dispatch(event)

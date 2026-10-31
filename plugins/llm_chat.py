@@ -79,14 +79,17 @@ async def _chat(event: Event, bot: Bot) -> None:
         await bot.reply(event, RATE_LIMIT_TEXT)
         return
     if not await _should_reply(event, bot, prompt):
-        logger.info("唤醒判断未通过 conv={}", conv_id)
+        logger.info("唤醒判断未通过，跳过回复 conv={}", conv_id)
         return
+    logger.info("收到 [{}] 消息: {}", event.type, prompt[:50])
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
     async with _HISTORY_LOCK:
         history = await _load(bot)
         turns = _messages_of(history.get(conv_id))
     user_content = await _user_content(bot, prompt, event.images)
     messages = _build_messages(user_content, turns, limit)
+    model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
+    logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
         reply = await _complete(bot, messages)
     except Exception:
@@ -95,6 +98,7 @@ async def _chat(event: Event, bot: Bot) -> None:
         )
         await bot.reply(event, FALLBACK)
         return
+    logger.info("LLM 回复成功: {}...", reply[:30])
     async with _HISTORY_LOCK:
         history = await _load(bot)
         turns = _messages_of(history.get(conv_id))
@@ -130,6 +134,9 @@ async def _complete(
     ) as resp:
         data: Any = await resp.json(content_type=None)
         if resp.status >= 400:
+            logger.error(
+                "LLM 请求失败 status={} data={}", resp.status, str(data)[:200]
+            )
             raise RuntimeError(f"LLM status={resp.status} body={str(data)[:200]}")
     if not isinstance(data, dict):
         raise RuntimeError(f"LLM 响应非对象: {data}")
@@ -214,6 +221,7 @@ async def _eval_reply(bot: Bot, prompt: str) -> bool:
 
 
 async def _download_image(bot: Bot, url: str) -> str | None:
+    logger.info("开始下载图片: {}", url[:50])
     session = await bot.api.session()
     try:
         async with session.get(
@@ -232,6 +240,7 @@ async def _download_image(bot: Bot, url: str) -> str | None:
     if len(data) > MAX_IMAGE_BYTES:
         logger.warning("图片超过 {} 字节上限, 已忽略", MAX_IMAGE_BYTES)
         return None
+    logger.info("图片下载完成, 大小: {} 字节", len(data))
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{content_type};base64,{encoded}"
 
