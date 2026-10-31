@@ -50,7 +50,7 @@ llm_subconscious_min_length = 6
 
 # 拟真人格
 llm_human_like_mode = false
-llm_human_like_prompt = "请用最简短、口语化的方式回复，就像在微信上和朋友聊天。绝对不要使用括号进行动作描写，不要有旁白。"
+llm_human_like_prompt = "请用最简短、口语化的方式回复，就像在微信上和朋友聊天。绝对不要使用括号进行动作描写，不要有旁白。如果回复适合拆成多条消息，请在语义自然的停顿处使用 ||| 分隔；不要在回复内容中解释或展示这个分隔符。"
 llm_reply_max_parts = 3
 
 # 日志

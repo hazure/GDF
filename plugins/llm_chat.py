@@ -55,11 +55,12 @@ SUBCONSCIOUS_MAX_TOKENS = 50
 DEFAULT_HUMAN_LIKE_PROMPT = (
     "请用最简短、口语化的方式回复，就像在微信上和朋友聊天。"
     "绝对不要使用括号进行动作描写，不要有旁白。"
+    "如果回复适合拆成多条消息，请在语义自然的停顿处使用 ||| 分隔；"
+    "不要在回复内容中解释或展示这个分隔符。"
 )
 DEFAULT_MAX_PARTS = 3
 REPLY_INTERVAL = 1.0
 BRACKET_PATTERN = re.compile(r"[（(][^（()）]*[)）]")
-SENTENCE_PATTERN = re.compile(r"[^。！？!?…]+[。！？!?…]*")
 SUBCONSCIOUS_PLACEHOLDERS = {
     "空字符串",
     "空",
@@ -488,15 +489,16 @@ def _clean_brackets(text: str) -> str:
     return " ".join(cleaned.split())
 
 
-def _sentences(text: str) -> list[str]:
-    return [part.strip() for part in SENTENCE_PATTERN.findall(text) if part.strip()]
+def _reply_parts(text: str) -> list[str]:
+    return [part.strip() for part in text.split("|||") if part.strip()]
 
 
 async def _send_reply(event: Event, bot: Bot, reply: str) -> None:
     if not flag_config(bot.config, "llm_human_like_mode"):
         await bot.reply(event, reply)
         return
-    parts = _sentences(_clean_brackets(reply))
+    cleaned = _clean_brackets(reply)
+    parts = _reply_parts(cleaned)
     if not parts:
         await bot.reply(event, reply)
         return
