@@ -41,9 +41,8 @@ IMAGE_TIMEOUT = 15.0
 MAX_TOOL_ROUNDS = 3
 MCP_TIMEOUT = 10.0
 DEFAULT_SUBCONSCIOUS_PROMPT = (
-    "你是一个后台的潜意识观察者。请阅读以下对话，如果包含关于用户的重要事实、"
-    "喜好、计划或情绪（例如：考试、日程、喜好、讨厌的事），请提取出来。"
-    "如果没有，返回空字符串。"
+    "你是后台观察者。请提取关于【{user_name}】的重要事实或情绪。"
+    "输出格式必须为：『{user_name}：提取出的事实』。如果没有重要信息，输出 NONE。"
 )
 DEFAULT_SUBCONSCIOUS_WINDOW = 60.0
 DEFAULT_SUBCONSCIOUS_MIN_LENGTH = 6
@@ -66,13 +65,25 @@ PING_COMMAND = "ping"
 
 TOOL_DIRECTIVE = (
     "【系统工具指令】\n"
-    "你拥有长期记忆的读写能力。\n"
-    "1. 当用户明确要求你「记住」某事，或提到重要的个人信息（如名字、喜好）时，"
-    "你必须在回复的同时，通过调用 remember 工具将其存入记忆库。\n"
-    "2. 遇到需要回忆用户信息的问题时，必须优先调用 recall 工具查询，"
-    "绝不允许凭空捏造。\n"
+    "你拥有长期记忆的读写能力，记忆以「个人档案」形式按发言人隔离。\n"
+    "1. 当用户明确要求你「记住」某事，或提到重要的个人信息（如名字、喜好、计划、"
+    "情绪）时，你必须在回复的同时，通过调用 remember 工具把该事实写入档案。\n"
+    "2. 当你需要回答关于用户个人偏好、过去发生的事、或者某些重要信息时，"
+    "你必须调用 recall 工具查阅该用户的档案，不要凭空瞎猜。\n"
     "注意：千万不要只口头答应「我记住了」，却不调用工具。"
 )
+
+RECALL_HINTS = (
+    "记得",
+    "还记得",
+    "我是谁",
+    "我叫什么",
+    "我上次",
+    "你喜欢我吗",
+    "记忆",
+    "档案",
+)
+RECALL_NOTE = "这是该用户的历史事实，请结合这些事实作答。"
 
 _HISTORY_LOCK = asyncio.Lock()
 _RATE_LOCK = asyncio.Lock()
@@ -111,14 +122,16 @@ async def _chat(event: Event, bot: Bot) -> None:
     if prompt.startswith(ECHO_PREFIX) or prompt == PING_COMMAND:
         return
     conv_id = _conv_id(event)
+    user_id = _user_id(event)
+    display_name = _user_name(event)
     _ensure_gc(bot)
     if not await _should_reply(event, bot, prompt):
         logger.info("唤醒判断未通过，跳过回复 conv={}", conv_id)
-        _spawn_subconscious(event, bot, prompt, conv_id)
+        _spawn_subconscious(event, bot, prompt, conv_id, user_id, display_name)
         return
     if not await _allow(bot, conv_id):
         logger.warning("触发频控, 静默跳过 conv={}", conv_id)
-        _spawn_subconscious(event, bot, prompt, conv_id)
+        _spawn_subconscious(event, bot, prompt, conv_id, user_id, display_name)
         return
     logger.info("收到 [{}] 消息: {}", event.type, prompt[:50])
     limit = _int_config(bot, "llm_context_limit", DEFAULT_CONTEXT_LIMIT)
@@ -130,7 +143,14 @@ async def _chat(event: Event, bot: Bot) -> None:
     model = str(bot.config.get("llm_model") or DEFAULT_MODEL)
     logger.info("正在请求 LLM, model={}, 图片数={}", model, len(event.images))
     try:
-        reply = await _complete(bot, messages, conv_id=conv_id)
+        reply = await _complete(
+            bot,
+            messages,
+            conv_id=conv_id,
+            user_id=user_id,
+            display_name=display_name,
+            prompt=prompt,
+        )
     except Exception:
         logger.opt(exception=True).error(
             "LLM 请求失败 conv={} event={}", conv_id, event.type
@@ -156,9 +176,14 @@ async def _complete(
     messages: list[dict[str, Any]],
     max_tokens: int | None = None,
     conv_id: str = "",
+    user_id: str = "",
+    display_name: str = "",
+    prompt: str = "",
 ) -> str:
     if conv_id and await ensure_started(bot):
-        return await _request_with_tools(bot, messages, conv_id, max_tokens)
+        return await _request_with_tools(
+            bot, messages, user_id, display_name, prompt, max_tokens
+        )
     data = await _post_completion(bot, messages, max_tokens)
     return _extract_text(data)
 
@@ -168,6 +193,7 @@ async def _post_completion(
     messages: list[dict[str, Any]],
     max_tokens: int | None = None,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str = "auto",
 ) -> dict[str, Any]:
     api_key = str(bot.config.get("llm_api_key") or "")
     if not api_key:
@@ -177,7 +203,7 @@ async def _post_completion(
     payload = _payload(bot, messages, max_tokens)
     if tools:
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice
     session = await bot.api.session()
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -211,12 +237,25 @@ def _extract_text(data: dict[str, Any]) -> str:
 async def _request_with_tools(
     bot: Bot,
     messages: list[dict[str, Any]],
-    conv_id: str,
+    user_id: str = "",
+    display_name: str = "",
+    prompt: str = "",
     max_tokens: int | None = None,
 ) -> str:
     working = list(messages)
+    choice = _tool_choice(prompt)
     for _ in range(MAX_TOOL_ROUNDS):
-        data = await _post_completion(bot, working, max_tokens, LLM_TOOLS)
+        try:
+            data = await _post_completion(
+                bot, working, max_tokens, LLM_TOOLS, choice
+            )
+        except RuntimeError as exc:
+            if choice == "required" and "tool_choice" in str(exc).lower():
+                logger.warning("模型不支持 tool_choice=required, 降级为 auto")
+                choice = "auto"
+                continue
+            raise
+        choice = "auto"
         choices = data.get("choices") or []
         if not choices:
             raise RuntimeError(f"LLM 响应缺少 choices: {data}")
@@ -232,12 +271,16 @@ async def _request_with_tools(
             }
         )
         for call in calls:
-            working.append(await _exec_tool(bot, conv_id, call))
+            working.append(await _exec_tool(bot, user_id, display_name, call))
     raise RuntimeError("工具调用轮次超限")
 
 
+def _tool_choice(prompt: str) -> str:
+    return "required" if any(word in prompt for word in RECALL_HINTS) else "auto"
+
+
 async def _exec_tool(
-    bot: Bot, conv_id: str, call: dict[str, Any]
+    bot: Bot, user_id: str, display_name: str, call: dict[str, Any]
 ) -> dict[str, Any]:
     call_id = str(call.get("id") or "")
     function = call.get("function") or {}
@@ -256,15 +299,19 @@ async def _exec_tool(
         "params": {
             "name": name,
             "arguments": arguments,
-            "user_openid": conv_id,
+            "user_id": user_id,
+            "display_name": display_name,
         },
     }
     result = await _mcp_post(bot, payload)
-    logger.info("MCP 调用 {} -> {}", name, str(result)[:120])
+    logger.info("MCP 调用 {} user={} -> {}", name, display_name, str(result)[:120])
+    content = _tool_text(result)
+    if name == "recall":
+        content = f"{content}\n{RECALL_NOTE}"
     return {
         "role": "tool",
         "tool_call_id": call_id,
-        "content": _tool_text(result),
+        "content": content,
     }
 
 
@@ -308,7 +355,12 @@ def _tool_text(result: Any) -> str:
 
 
 def _spawn_subconscious(
-    event: Event, bot: Bot, prompt: str, conv_id: str
+    event: Event,
+    bot: Bot,
+    prompt: str,
+    conv_id: str,
+    user_id: str,
+    display_name: str,
 ) -> None:
     if not flag_config(bot.config, "llm_subconscious_enabled"):
         return
@@ -329,18 +381,26 @@ def _spawn_subconscious(
     if not getattr(bot, "_sub_shutdown_registered", False):
         bot.on_shutdown(_cancel_subconscious)
         setattr(bot, "_sub_shutdown_registered", True)
-    task = asyncio.create_task(_subconscious_memory(event, bot, prompt, conv_id))
+    task = asyncio.create_task(
+        _subconscious_memory(event, bot, prompt, conv_id, user_id, display_name)
+    )
     _SUB_TASKS.add(task)
     task.add_done_callback(_SUB_TASKS.discard)
 
 
 async def _subconscious_memory(
-    event: Event, bot: Bot, prompt: str, conv_id: str
+    event: Event,
+    bot: Bot,
+    prompt: str,
+    conv_id: str,
+    user_id: str,
+    display_name: str,
 ) -> None:
     try:
-        system = str(
+        template = str(
             bot.config.get("llm_subconscious_prompt") or DEFAULT_SUBCONSCIOUS_PROMPT
         )
+        system = template.replace("{user_name}", display_name)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
@@ -351,7 +411,7 @@ async def _subconscious_memory(
         finding = _extract_text(data).strip()
         if _is_placeholder(finding):
             return
-        await _remember(bot, conv_id, finding)
+        await _remember(bot, user_id, display_name, finding)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -365,9 +425,11 @@ def _is_placeholder(finding: str) -> bool:
     return not cleaned or cleaned in SUBCONSCIOUS_PLACEHOLDERS
 
 
-async def _remember(bot: Bot, conv_id: str, content: str) -> None:
+async def _remember(
+    bot: Bot, user_id: str, display_name: str, content: str
+) -> None:
     if not await ensure_started(bot):
-        logger.warning("MCP 未启用或启动失败, 放弃潜意识写入 conv={}", conv_id)
+        logger.warning("MCP 未启用或启动失败, 放弃潜意识写入 user={}", display_name)
         return
     payload: dict[str, Any] = {
         "jsonrpc": "2.0",
@@ -375,18 +437,16 @@ async def _remember(bot: Bot, conv_id: str, content: str) -> None:
         "method": "tools/call",
         "params": {
             "name": "remember",
-            "arguments": {
-                "key": f"潜意识-{int(time.time())}",
-                "content": content,
-            },
-            "user_openid": conv_id,
+            "arguments": {"fact": content},
+            "user_id": user_id,
+            "display_name": display_name,
         },
     }
     result = await _mcp_post(bot, payload)
     if isinstance(result, dict) and "error" in result:
-        logger.warning("潜意识写入失败 conv={} -> {}", conv_id, str(result)[:120])
+        logger.warning("潜意识写入失败 user={} -> {}", display_name, str(result)[:120])
         return
-    logger.info("潜意识记忆已入库 conv={} -> {}", conv_id, str(result)[:120])
+    logger.info("潜意识记忆已入库 user={} -> {}", display_name, str(result)[:120])
 
 
 async def _cancel_subconscious() -> None:
@@ -534,6 +594,15 @@ def _conv_id(event: Event) -> str:
     if isinstance(event, C2CMessage):
         return f"user:{event.author.id}"
     return f"event:{event.id}"
+
+
+def _user_id(event: Event) -> str:
+    return event.author.id or "unknown"
+
+
+def _user_name(event: Event) -> str:
+    author_id = _user_id(event)
+    return author_id[-6:] if len(author_id) >= 6 else author_id
 
 
 def _history_path(bot: Bot) -> Path:

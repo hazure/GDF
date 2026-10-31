@@ -1,6 +1,5 @@
 import asyncio
 import json
-import time
 from pathlib import Path
 from typing import Any
 
@@ -19,31 +18,28 @@ ENDPOINT = "/mcp"
 TOOL_DEFS: list[dict[str, Any]] = [
     {
         "name": "remember",
-        "description": "保存一条长期记忆, key 为记忆主题, content 为内容",
+        "description": "把关于当前用户的一条重要事实或偏好写入其个人档案",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "key": {"type": "string", "description": "记忆主题"},
-                "content": {"type": "string", "description": "记忆内容"},
+                "fact": {
+                    "type": "string",
+                    "description": "关于该用户的一条事实、偏好、计划或情绪",
+                },
             },
-            "required": ["key", "content"],
+            "required": ["fact"],
         },
     },
     {
         "name": "recall",
-        "description": "按 key 前缀检索长期记忆, 返回匹配列表",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "key": {"type": "string", "description": "记忆主题前缀"},
-            },
-            "required": ["key"],
-        },
+        "description": "读取当前用户的个人档案, 返回其历史事实列表",
+        "inputSchema": {"type": "object", "properties": {}},
     },
 ]
 
 _LOCK = asyncio.Lock()
 _RUNNER: web.AppRunner | None = None
+FACTS_LIMIT = 20
 
 LLM_TOOLS: list[dict[str, Any]] = [
     {
@@ -85,34 +81,43 @@ async def _save(data: dict[str, dict[str, Any]]) -> None:
     await asyncio.to_thread(tmp.replace, path)
 
 
-async def _tool_remember(ns: str, args: dict[str, Any]) -> dict[str, Any]:
-    key = str(args.get("key") or "").strip()
-    content = str(args.get("content") or "").strip()
-    if not key or not content:
-        return {"error": "key 与 content 均不能为空"}
+async def _tool_remember(
+    user_id: str, name: str, args: dict[str, Any]
+) -> dict[str, Any]:
+    fact = str(args.get("fact") or "").strip()
+    if not fact:
+        return {"error": "fact 不能为空"}
     async with _LOCK:
         data = await _load()
-        bucket = data.setdefault(ns, {})
-        bucket[key] = {"content": content, "updated_at": time.time()}
+        profile = data.get(user_id)
+        if not isinstance(profile, dict):
+            profile = {"name": "", "facts": []}
+        facts = profile.get("facts")
+        if not isinstance(facts, list):
+            facts = []
+        if fact not in facts:
+            facts.append(fact)
+        profile["facts"] = facts[-FACTS_LIMIT:]
+        if name:
+            profile["name"] = name
+        data[user_id] = profile
         await _save(data)
-    return {"ok": True, "key": key}
+    return {"ok": True, "user_id": user_id, "name": profile.get("name", ""),
+            "fact": fact, "total": len(profile["facts"])}
 
 
-async def _tool_recall(ns: str, args: dict[str, Any]) -> dict[str, Any]:
-    prefix = str(args.get("key") or "").strip()
+async def _tool_recall(user_id: str) -> dict[str, Any]:
     async with _LOCK:
         data = await _load()
-        bucket = data.get(ns) or {}
-    items = [
-        {
-            "key": key,
-            "content": value.get("content"),
-            "updated_at": value.get("updated_at"),
-        }
-        for key, value in bucket.items()
-        if prefix and key.startswith(prefix)
-    ]
-    return {"items": items}
+        profile = data.get(user_id)
+    if not isinstance(profile, dict):
+        return {"user_id": user_id, "name": "", "facts": []}
+    facts = profile.get("facts")
+    return {
+        "user_id": user_id,
+        "name": profile.get("name", ""),
+        "facts": facts if isinstance(facts, list) else [],
+    }
 
 
 def _rpc_ok(request_id: Any, result: Any) -> dict[str, Any]:
@@ -140,14 +145,16 @@ async def _dispatch(method: str, params: dict[str, Any]) -> Any:
         name = str(params.get("name") or "")
         raw_args = params.get("arguments")
         args = dict(raw_args) if isinstance(raw_args, dict) else {}
-        namespace = str(params.get("user_openid") or "").strip()
-        args.pop("user_openid", None)
-        if not namespace:
-            return _tool_error("缺少 user_openid")
+        user_id = str(params.get("user_id") or "").strip()
+        display_name = str(params.get("display_name") or "").strip()
+        args.pop("user_id", None)
+        args.pop("display_name", None)
+        if not user_id:
+            return _tool_error("缺少 user_id")
         if name == "remember":
-            result = await _tool_remember(namespace, args)
+            result = await _tool_remember(user_id, display_name, args)
         elif name == "recall":
-            result = await _tool_recall(namespace, args)
+            result = await _tool_recall(user_id)
         else:
             return _tool_error(f"未知工具: {name}")
         return {

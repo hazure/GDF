@@ -44,7 +44,7 @@ mcp_token = ""
 
 # 潜意识旁路
 llm_subconscious_enabled = true
-llm_subconscious_prompt = "你是一个后台的潜意识观察者。请阅读以下对话，如果包含关于用户的重要事实、喜好、计划或情绪（例如：考试、日程、喜好、讨厌的事），请提取出来。如果没有，返回空字符串。"
+llm_subconscious_prompt = "你是后台观察者。请提取关于【{user_name}】的重要事实或情绪。输出格式必须为：『{user_name}：提取出的事实』。如果没有重要信息，输出 NONE。"
 llm_subconscious_window = 60
 llm_subconscious_min_length = 6
 

@@ -163,8 +163,10 @@ mcp_token = ""               # 非空时校验 Bearer
 架构：
 
 - 服务端为原生 aiohttp + JSON-RPC 2.0，支持 `initialize` / `tools/list` / `tools/call`，未实现 SSE，标准 MCP 客户端（Claude Desktop 等）连不上。
-- 记忆存于 `data/long_term_memory.json`，按 `user_openid` 隔离命名空间，写入走 lock + tmp + replace。
-- `user_openid` 由插件侧强制注入，模型无法在 arguments 中伪造他人身份。
+- 记忆存于 `data/long_term_memory.json`，结构为 `{user_id: {"name": "...", "facts": [...]}}`，按发言人隔离个人档案，每人最多保留最近 20 条事实，写入走 lock + tmp + replace。
+- `user_id` 与 `display_name` 由插件侧强制注入：`user_id` 为发言人 openid，`display_name` 取其末 6 位作为称呼。模型无法在 arguments 中伪造他人身份。
+- 主流程命中回忆倾向词（「记得」「我是谁」「我上次」等）时，会把 `tool_choice` 临时提为 `required` 迫使模型调用 `recall`；若模型不支持该值，自动降级回 `auto` 重试。
+- `recall` 结果回填给模型时会附带「请结合这些事实作答」的提示，避免模型拿到档案仍凭空作答。
 - `llm_chat` 在启用时把工具定义注入 `payload["tools"]`，收到 `tool_calls` 后回调本服务，结果以 `role="tool"` 塞回上下文再次请求，最多 3 轮。
 - 服务在首次请求时懒启动，进程退出时经 `bot.on_shutdown` 自动关闭。
 
