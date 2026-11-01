@@ -34,3 +34,14 @@
 1. 类型提示（Type Hint）全覆盖：所有函数参数、返回值必须标明类型，这是参数自动注入的基础。
 2. 异步纯正：全链路 `asyncio`，禁止在协程中混用阻塞代码。
 3. 不要替用户做决定：框架层绝对不内置数据库、定时任务、权限判断、上下文管理等业务功能，统统留给插件。
+
+## 五、 日志输出规范
+
+日志输出分为两类 sink，二者并存：
+
+1. 文件 sink：`logs/info_YYYY-MM-DD.log`（DEBUG+）与 `logs/error_YYYY-MM-DD.log`（ERROR），用于事后排查。
+2. 终端 sink：`sys.stderr`（INFO+），用于本地开发观察与 Systemd/journald 采集。
+
+终端 sink 的 `colorize` 必须绑定 `sys.stderr.isatty()`，避免非 TTY 环境（Systemd、管道重定向）写入 ANSI 转义序列。
+
+注意：交互式控制台（`GDF >` 提示符）与 `--log` 尾随工具允许使用 `print`，业务路径严禁使用 `print`。

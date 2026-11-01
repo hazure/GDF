@@ -1,3 +1,4 @@
+import sys
 from typing import Any
 
 from loguru import logger
@@ -14,6 +15,12 @@ def setup_logger(config: dict[str, Any] | None = None) -> None:
 
     file_format = "{time:YYYY-MM-DD HH:mm:ss} [{level}] {message}"
 
+    logger.add(
+        sys.stderr,
+        format="<white>{time:HH:mm:ss}</white> [<level>{level}</level>] <level>{message}</level>",
+        colorize=sys.stderr.isatty(),
+        level="INFO",
+    )
     logger.add(
         f"{log_dir}/info_{{time:YYYY-MM-DD}}.log",
         format=file_format,
