@@ -60,6 +60,8 @@ DEFAULT_HUMAN_LIKE_PROMPT = (
 )
 DEFAULT_MAX_PARTS = 3
 REPLY_INTERVAL = 1.0
+MAX_CONTEXT_CHARS = 4000
+MAX_TOOL_RESULT_CHARS = 2000
 BRACKET_PATTERN = re.compile(r"[（(][^（()）]*[)）]")
 SUBCONSCIOUS_PLACEHOLDERS = {
     "空字符串",
@@ -325,6 +327,11 @@ async def _exec_tool(
     result = await _mcp_post(bot, payload)
     logger.info("MCP 调用 {} user={} -> {}", name, display_name, str(result)[:120])
     content = _tool_text(result)
+    if len(content) > MAX_TOOL_RESULT_CHARS:
+        content = (
+            f"{content[:MAX_TOOL_RESULT_CHARS]}"
+            f"\n...[已截断，原长 {len(content)} 字符]"
+        )
     if name == "recall":
         content = f"{content}\n{RECALL_NOTE}"
     return {
@@ -539,6 +546,10 @@ def _payload(
     return payload
 
 
+def _chars_of(messages: list[dict[str, str]]) -> int:
+    return sum(len(str(item.get("content") or "")) for item in messages)
+
+
 def _build_messages(
     bot: Bot, user_content: Any, turns: list[dict[str, str]], limit: int
 ) -> list[dict[str, Any]]:
@@ -546,8 +557,10 @@ def _build_messages(
     system = _system_prompt(bot)
     if system:
         messages.append({"role": "system", "content": system})
-    if limit > 0:
-        messages.extend(turns[-2 * limit :])
+    selected = turns[-2 * limit :] if limit > 0 else []
+    while selected and _chars_of(selected) > MAX_CONTEXT_CHARS:
+        selected = selected[1:]
+    messages.extend(selected)
     messages.append({"role": "user", "content": user_content})
     return messages
 
