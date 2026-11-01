@@ -1,0 +1,20 @@
+[Unit]
+Description=GDF - minimalist event-driven asyncio bot framework
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/gdf
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+# 请将路径替换为你环境中的 python3 和 main.py 绝对路径
+ExecStart=/path/to/gdf/.venv/bin/python3 /path/to/gdf/main.py --no-input
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gdf
+
+[Install]
+WantedBy=multi-user.target

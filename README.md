@@ -90,7 +90,7 @@ plugins/prompt_world.txt    世界书设定
 
 ```
 python main.py                 # 默认模式，挂载 GDF > 控制台
-python main.py --no-input      # 无头模式，不挂载控制台，日志只进文件
+python main.py --no-input      # 无头模式，不挂载控制台，日志写入文件和 stderr (journald)
 python main.py --log           # 日志查看模式，只读，不启动机器人
 ```
 
@@ -190,6 +190,30 @@ logs/error_YYYY-MM-DD.log   ERROR，保留 7 天
 
 `data/` 与 `logs/` 均为运行时生成，不入库。清空对话记忆直接删除 `data/history.json`。
 
+## 生产环境部署 (Linux Systemd)
+
+仓库根目录提供 `gdf.service` 模板。部署前请先修改其中的路径占位符：
+
+- `WorkingDirectory=/path/to/gdf` 改为项目实际绝对路径
+- `ExecStart=/path/to/gdf/.venv/bin/python3 /path/to/gdf/main.py --no-input` 改为虚拟环境解释器与 `main.py` 的实际绝对路径
+
+修改后执行：
+
+```
+sudo cp gdf.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable gdf
+sudo systemctl start gdf
+```
+
+查看实时日志：
+
+```
+journalctl -u gdf -f
+```
+
+`--no-input` 模式下业务日志同时写入 `logs/` 文件与 stderr，后者由 journald 采集，因此 `journalctl` 可直接看到运行日志。
+
 ## 目录
 
 ```
@@ -199,4 +223,5 @@ plugins/                业务插件区
 config.toml             本地配置，不入库
 config.example.toml     配置模板
 PRINCIPLES.md           项目原则
+gdf.service             Systemd 服务模板
 ```
