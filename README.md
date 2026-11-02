@@ -148,8 +148,8 @@ llm_vision_enabled = true
 
 | 工具 | 作用 |
 |---|---|
-| `remember(key, content)` | 写入一条长期记忆 |
-| `recall(key)` | 按 key 前缀检索，返回列表 |
+| `remember(fact)` | 写入一条长期记忆 |
+| `recall()` | 读取用户全量记忆，按时间倒序返回 |
 
 配置：
 
